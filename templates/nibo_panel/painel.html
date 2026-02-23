@@ -1,0 +1,255 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Painel Nibo{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'css/painel.css' %}">
+{% endblock %}
+
+{% block content %}
+  <h4 class="mb-3 page-title">Painel Nibo</h4>
+
+  {% if messages %}
+    <div class="mb-3">
+      {% for m in messages %}
+        <div class="alert alert-{{ m.tags|default:'info' }} mb-1">{{ m }}</div>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  <!-- FILTROS -->
+  <form class="row g-2 mb-3" method="get">
+    <div class="col-auto">{{ form.data_ini.label_tag }} {{ form.data_ini }}</div>
+    <div class="col-auto">{{ form.data_fim.label_tag }} {{ form.data_fim }}</div>
+    <div class="col-auto">{{ form.cliente.label_tag }} {{ form.cliente }}</div>
+
+    <!-- Checklist de credores -->
+    <div class="col-12">
+      {{ form.credores.label_tag }}
+      <div class="p-2 border rounded d-grid" style="grid-template-columns: repeat(6, minmax(120px, 1fr)); gap: .25rem .75rem;">
+        {{ form.credores }}
+      </div>
+      <small class="form-text">
+        <a href="#" id="toggle-credores">Marcar/Desmarcar todos</a>
+      </small>
+    </div>
+
+    <div class="col-auto">{{ form.enviado.label_tag }} {{ form.enviado }}</div>
+    <div class="col-auto">
+      <button class="btn btn-primary">Filtrar</button>
+    </div>
+  </form>
+
+  <!-- ENVIO -->
+  <form method="post" action="{% url 'nibo_panel:enviar' %}">
+    {% csrf_token %}
+    <div class="row g-4">
+
+      <!-- tb_repasse -->
+      <div class="col-12">
+        <h6 class="mb-1 section-title">tb_repasse</h6>
+        <div class="panel">
+          <table class="table table-sm table-hover align-middle mb-0 table-zebra">
+            <thead class="table-sticky">
+              <tr>
+                <th><input type="checkbox" data-group=".chk-repasse" class="js-checkall"></th>
+                <th>N°acordo</th><th>Data_pagamento</th><th>Cliente</th><th>cpg</th>
+                <th>credor</th><th>Filial</th><th>obs</th><th>vlr repasse</th><th>Op-Id</th><th>enviado</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for r in repasse %}
+              <tr>
+                <td><input class="form-check-input chk-repasse" type="checkbox" name="repasse_ids" value="{{ r.id }}"></td>
+                <td>{{ r.aco_id }}</td>
+                <td>{{ r.pgo_data|date:"d/m/Y H:i" }}</td>
+                <td>{{ r.cliente_nome }}</td>
+                <td>{{ r.cliente_cpfcnpj }}</td>
+                <td>{{ r.credor_sigla }}</td>
+                <td>{{ r.filial_nome }}</td>
+                <td>{{ r.con_obs }}</td>
+                <td>{{ r.vlr_repasse }}</td>
+                <td>{{ r.ope_nome }}</td>
+                <td>{{ r.enviado }}</td>
+              </tr>
+              {% empty %}
+              <tr><td colspan="10" class="text-muted text-center py-3">Sem dados</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- tb_repassevr -->
+      <div class="col-12">
+        <h6 class="mb-1 section-title">tb_repassevr</h6>
+        <div class="panel">
+          <table class="table table-sm table-hover align-middle mb-0 table-zebra">
+            <thead class="table-sticky">
+              <tr>
+                <th><input type="checkbox" data-group=".chk-repassevr" class="js-checkall"></th>
+                <th>N°acordo</th><th>Data_pagamento</th><th>Cliente</th><th>cpg</th>
+                <th>credor</th><th>Filial</th><th>obs</th><th>vlr repasse</th><th>Op-Id</th><th>enviado</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for r in repassevr %}
+              <tr>
+                <td><input class="form-check-input chk-repassevr" type="checkbox" name="repassevr_ids" value="{{ r.id }}"></td>
+                <td>{{ r.aco_id }}</td>
+                <td>{{ r.pgo_data|date:"d/m/Y H:i" }}</td>
+                <td>{{ r.cliente_nome }}</td>
+                <td>{{ r.cliente_cpfcnpj }}</td>
+                <td>{{ r.credor_sigla }}</td>
+                <td>{{ r.filial_nome }}</td>
+                <td>{{ r.con_obs }}</td>
+                <td>{{ r.vlr_repasse }}</td>
+                <td>{{ r.ope_nome }}</td>
+                <td>{{ r.enviado }}</td>
+              </tr>
+              {% empty %}
+              <tr><td colspan="10" class="text-muted text-center py-3">Sem dados</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- tb_despesa -->
+      <div class="col-12">
+        <h6 class="mb-1 section-title">tb_despesa</h6>
+        <div class="panel">
+          <table class="table table-sm table-hover align-middle mb-0 table-zebra">
+            <thead class="table-sticky">
+              <tr>
+                <th><input type="checkbox" data-group=".chk-despesa" class="js-checkall"></th>
+                <th>N°acordo</th><th>Data_pagamento</th><th>Cliente</th><th>cpg</th>
+                <th>credor</th><th>Filial</th><th>obs</th><th>vlr repasse</th><th>Op-Id</th><th>enviado</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for r in despesa %}
+              <tr>
+                <td><input class="form-check-input chk-despesa" type="checkbox" name="despesa_ids" value="{{ r.id }}"></td>
+                <td>{{ r.aco_id }}</td>
+                <td>{{ r.pgo_data|date:"d/m/Y H:i"|default:"-" }}</td>
+                <td>{{ r.cliente_nome|default:"-" }}</td>
+                <td>{{ r.cliente_cpfcnpj|default:"-" }}</td>
+                <td>{{ r.credor_sigla|default:"-" }}</td>
+                <td>{{ r.filial_nome|default:"-" }}</td>
+                <td>{{ r.con_obs|default:"-" }}</td>
+                <td>{{ r.des_valor }}</td>
+                <td>{{ r.ope_nome }}</td>
+                <td>{{ r.enviado }}</td>
+              </tr>
+              {% empty %}
+              <tr><td colspan="10" class="text-muted text-center py-3">Sem dados</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- tb_contareceber -->
+      <div class="col-12">
+        <h6 class="mb-1 section-title">tb_contareceber</h6>
+        <div class="panel">
+          <table class="table table-sm table-hover align-middle mb-0 table-zebra">
+            <thead class="table-sticky">
+              <tr>
+                <th><input type="checkbox" data-group=".chk-cr" class="js-checkall"></th>
+                <th>N°acordo</th><th>Data_pagamento</th><th>Cliente</th><th>cpg</th>
+                <th>credor</th><th>Filial</th><th>obs</th><th>vlr repasse</th><th>Op-Id</th><th>enviado</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for r in contareceber %}
+              <tr>
+                <td><input class="form-check-input chk-cr" type="checkbox" name="contareceber_ids" value="{{ r.id }}"></td>
+                <td>{{ r.co_id }}</td>
+                <td>{{ r.pgo_data|date:"d/m/Y H:i" }}</td>
+                <td>{{ r.cliente_nome }}</td>
+                <td>{{ r.cliente_cpfcnpj }}</td>
+                <td>{{ r.credor_sigla }}</td>
+                <td>{{ r.filial_nome }}</td>
+                <td>{{ r.con_obs|default:"-" }}</td>
+                <td>{{ r.rec_ho }}</td>
+                <td>{{ r.ope_nome }}</td>
+                <td>{{ r.enviado }}</td>
+              </tr>
+              {% empty %}
+              <tr><td colspan="10" class="text-muted text-center py-3">Sem dados</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- tb_contaspagar -->
+      <div class="col-12">
+        <h6 class="mb-1 section-title">tb_contaspagar</h6>
+        <div class="panel">
+          <table class="table table-sm table-hover align-middle mb-0 table-zebra">
+            <thead class="table-sticky">
+              <tr>
+                <th><input type="checkbox" data-group=".chk-cp" class="js-checkall"></th>
+                <th>N°acordo</th><th>Data_pagamento</th><th>Cliente</th><th>cpg</th>
+                <th>credor</th><th>Filial</th><th>obs</th><th>vlr repasse</th><th>Op-Id</th><th>enviado</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for r in contapagar %}
+              <tr>
+                <td><input class="form-check-input chk-cp" type="checkbox" name="contapagar_ids" value="{{ r.id }}"></td>
+                <td>{{ r.co_id }}</td>
+                <td>{{ r.pgo_data|date:"d/m/Y H:i" }}</td>
+                <td>{{ r.cliente_nome }}</td>
+                <td>{{ r.cliente_cpfcnpj }}</td>
+                <td>{{ r.credor_sigla }}</td>
+                <td>{{ r.filial_nome }}</td>
+                <td>{{ r.con_obs|default:"-" }}</td>
+                <td>{{ r.rec_ho }}</td>
+                <td>{{ r.ope_nome }}</td>
+                <td>{{ r.enviado }}</td>
+              </tr>
+              {% empty %}
+              <tr><td colspan="10" class="text-muted text-center py-3">Sem dados</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- campos extras + botão -->
+      <div class="col-12 d-flex flex-wrap gap-2 align-items-end">
+        <input class="form-control w-auto" name="cat_receb" placeholder="categoryId RECEITA (opcional)">
+        <input class="form-control w-auto" name="cat_pagar" placeholder="categoryId PAGAMENTO (opcional)">
+        <input class="form-control w-auto" name="cc_padrao" placeholder="costCenterId (fallback)">
+        <button class="btn btn-success">Enviar remessa</button>
+      </div>
+
+    </div>
+  </form>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  // marcar/desmarcar todos os credores
+  document.getElementById('toggle-credores')?.addEventListener('click', function(e){
+    e.preventDefault();
+    const checks = document.querySelectorAll('input[name="credores"]');
+    if(!checks.length) return;
+    const allChecked = Array.from(checks).every(c => c.checked);
+    checks.forEach(c => c.checked = !allChecked);
+  });
+
+  // master check das tabelas
+  document.querySelectorAll('.js-checkall').forEach(master => {
+    master.addEventListener('change', () => {
+      const group = master.getAttribute('data-group');
+      document.querySelectorAll(group).forEach(chk => chk.checked = master.checked);
+    });
+  });
+</script>
+{% endblock %}

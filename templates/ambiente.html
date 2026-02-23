@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Selecionar ambiente{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-10">
+    <h2 class="mb-1">Escolha o ambiente</h2>
+    <p class="text-secondary mb-4">Aparece só o que seu usuário tem permissão.</p>
+
+    <div class="row g-3">
+      {% if pode_gestao %}
+      <div class="col-md-6">
+        <div class="card shadow-sm h-100" style="border-radius:16px;">
+          <div class="card-body p-4">
+            <h4 class="mb-2">📋 Gestão</h4>
+            <p class="text-secondary">Quadro de tarefas, prazos, responsáveis e status.</p>
+            <a class="btn btn-primary" href="/gestao/">Entrar na Gestão</a>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
+      {% if pode_nibo %}
+      <div class="col-md-6">
+        <div class="card shadow-sm h-100" style="border-radius:16px;">
+          <div class="card-body p-4">
+            <h4 class="mb-2">💰 Nibo</h4>
+            <p class="text-secondary">Painel de repasses, despesas, contas e remessas.</p>
+            <a class="btn btn-primary" href="/nibo/">Entrar no Nibo</a>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

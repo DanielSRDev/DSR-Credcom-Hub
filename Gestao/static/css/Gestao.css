@@ -1,0 +1,141 @@
+.g-header{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-end;
+  gap:16px;
+  margin: 10px 0 18px;
+}
+.g-title{ margin:0; font-weight:800; letter-spacing:-0.5px; }
+.g-sub{ color:#6c757d; font-size:.95rem; }
+
+.g-grid{
+  display:grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap:18px;
+}
+@media (max-width: 1200px){
+  .g-grid{ grid-template-columns: 1fr; }
+}
+
+.g-col{
+  background: #f8f9fa;
+  border: 1px solid rgba(0,0,0,.08);
+  border-radius: 18px;
+  padding: 14px;
+}
+.g-col-header{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  padding: 6px 6px 12px;
+}
+
+.g-list{ display:flex; flex-direction:column; gap:12px; min-height: 40px; }
+.g-empty{ padding:14px; color:#6c757d; }
+
+.g-card{
+  border-radius: 16px;
+  background: #fff;
+  border: 1px solid rgba(0,0,0,.08);
+  box-shadow: 0 10px 24px rgba(0,0,0,.05);
+  padding: 12px 12px 10px;
+  transition: transform .12s ease, box-shadow .12s ease;
+}
+.g-card:hover{
+  transform: translateY(-2px);
+  box-shadow: 0 14px 30px rgba(0,0,0,.08);
+}
+.g-card-top{
+  display:flex;
+  justify-content:space-between;
+  gap:10px;
+  align-items:flex-start;
+}
+.g-card-title{
+  font-weight: 800;
+  cursor: grab;
+  user-select: none;
+}
+.g-card-desc{
+  margin-top:8px;
+  color:#343a40;
+  font-size:.95rem;
+  white-space: pre-line;
+}
+.g-card-meta{
+  margin-top:10px;
+  display:flex;
+  justify-content:space-between;
+  gap:12px;
+  flex-wrap:wrap;
+  font-size:.9rem;
+}
+.muted{ color:#6c757d; }
+
+.g-card-bottom{
+  margin-top:10px;
+  display:flex;
+  justify-content:space-between;
+  gap:10px;
+  align-items:center;
+  flex-wrap:wrap;
+}
+
+.icon-btn{
+  text-decoration:none;
+  padding: 4px 6px;
+  border-radius: 10px;
+}
+.icon-btn:hover{
+  background: rgba(0,0,0,.06);
+}
+
+.g-card.ok { border-left: 6px solid rgba(13,110,253,.55); }
+.g-card.warn { border-left: 6px solid rgba(255,193,7,.85); background: rgba(255,193,7,.08); }
+.g-card.late { border-left: 6px solid rgba(220,53,69,.9); background: rgba(220,53,69,.06); }
+.g-card.done { border-left: 6px solid rgba(25,135,84,.9); background: rgba(25,135,84,.06); }
+
+/* EXECUTANDO (verde bem claro/pastel) */
+.g-card.exec{
+  border-left: 6px solid #20c997;        /* teal/verde água */
+  background: #e9fbf4;                   /* bem clarinho */
+}
+
+.filter-bar{
+  background: #fff;
+  border: 1px solid #eef1f6;
+  border-radius: 14px;
+  padding: 14px;
+  box-shadow: 0 6px 18px rgba(10, 20, 40, .06);
+}
+.filter-bar .form-control,
+.filter-bar .form-select{
+  border-radius: 10px;
+}
+
+/* prioridade roxa */
+.g-card.prio{
+  background: #f3efff !important;
+  border-left: 6px solid #6f42c1 !important;
+}
+
+.g-prio-badge{
+  display:inline-block;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #6f42c1;
+  color: #fff;
+  margin-right: 8px;
+}
+
+.g-clip-count{
+  display:inline-block;
+  font-size: 11px;
+  font-weight: 800;
+  margin-left: 6px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(0,0,0,.08);
+}

@@ -1,0 +1,388 @@
+/* ============================
+   LAYOUT GERAL / BASE VISUAL
+   ============================ */
+body {
+    background-color: #f5f7fa;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 14px;
+    color: #1f2d3d;
+    line-height: 1.4;
+}
+
+/* título principal, se você aplicar .page-title um dia */
+.page-title {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: #1f2d3d;
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    margin-bottom: .75rem !important;
+    padding-bottom: .5rem;
+    border-bottom: 2px solid #dce3ef;
+}
+
+/* subtítulos tipo "TB_REPASSE" */
+.section-title {
+    font-size: .8rem;
+    text-transform: uppercase;
+    font-weight: 600;
+    color: #4a5873;
+    letter-spacing: .03em;
+    background-color: #eef2f9;
+    border: 1px solid #d6dbea;
+    padding: .4rem .6rem;
+    border-radius: .4rem;
+    width: fit-content;
+    margin-bottom: .5rem !important;
+}
+
+/* card genérico caso você use <div class="panel"> ao redor de blocos/tabelas */
+.panel {
+    background-color: #ffffff;
+    border: 1px solid #dce3ef;
+    border-radius: .6rem;
+    padding: .75rem 1rem;
+    box-shadow:
+        0 8px 16px -4px rgba(31,45,61,.08),
+        0 2px 6px rgba(31,45,61,.04);
+    overflow-x: auto; /* se tabela for muito larga */
+}
+
+/* ====================================
+   BLOCO DE FILTROS (o form do topo)
+   alvo: <form class="row g-2 mb-3">...</form>
+   ==================================== */
+form.row.g-2.mb-3 {
+    background-color: #ffffff;
+    border: 1px solid #dce3ef;
+    border-radius: .6rem;
+    box-shadow:
+        0 8px 16px -4px rgba(31,45,61,.08),
+        0 2px 6px rgba(31,45,61,.04);
+    padding: 1rem 1rem .75rem 1rem;
+    margin-bottom: 1.5rem !important;
+    font-size: .8rem;
+}
+
+/* labels tipo "Data ini:", "Data fim:", "Cliente:", "Enviado:" */
+form.row.g-2.mb-3 label {
+    font-weight: 600;
+    font-size: .8rem;
+    color: #4a5873;
+    margin-right: .25rem;
+    white-space: nowrap;
+}
+
+/* inputs/select do filtro */
+form.row.g-2.mb-3 input,
+form.row.g-2.mb-3 select {
+    font-size: .8rem;
+    line-height: 1.2rem;
+    padding: .4rem .5rem;
+    border-radius: .4rem;
+    border: 1px solid #bfc9dd;
+    background-color: #fff;
+}
+
+/* largura mínima dos selects/inputs quando cabível */
+form.row.g-2.mb-3 input {
+    min-width: 140px;
+}
+form.row.g-2.mb-3 select {
+    min-width: 100px;
+}
+
+/* foco nos campos */
+form.row.g-2.mb-3 input:focus,
+form.row.g-2.mb-3 select:focus {
+    border-color: #4c79ff;
+    box-shadow: 0 0 0 2px rgba(76,121,255,.25);
+    outline: 0;
+}
+
+/* botão "Filtrar" */
+form.row.g-2.mb-3 button.btn.btn-primary,
+form.row.g-2.mb-3 button.btn-primary {
+    font-size: .8rem;
+    font-weight: 600;
+    line-height: 1.1rem;
+    padding: .5rem .9rem;
+    border-radius: .45rem;
+    background-image: linear-gradient(to right, #3b6cff, #5f89ff);
+    border: 0;
+    box-shadow: 0 4px 10px rgba(63,99,255,.35);
+    color: #fff;
+}
+form.row.g-2.mb-3 button.btn.btn-primary:hover,
+form.row.g-2.mb-3 button.btn-primary:hover {
+    filter: brightness(1.05);
+}
+
+/* link "Marcar/Desmarcar todos" se tiver id="toggle-credores" */
+#toggle-credores {
+    font-size: .75rem;
+    font-weight: 600;
+    color: #4c79ff;
+    text-decoration: none;
+}
+#toggle-credores:hover {
+    text-decoration: underline;
+    color: #2d4dff;
+}
+
+/* texto auxiliar "Marcar/Desmarcar todos" etc */
+form.row.g-2.mb-3 small.form-text {
+    font-size: .7rem;
+    color: #4a5873;
+    font-weight: 500;
+}
+
+/* ===========================================================
+   LISTA DE CREDORES (SIGLAS)
+   objetivo: distribuir em COLUNAS lado a lado,
+   sem mexer no HTML
+   ===========================================================
+
+   Você tem algo assim no HTML:
+     <div class="p-2 border rounded" style="max-height:200px;overflow-y:auto">
+        [checkbox] +VGV <br>
+        [checkbox] AM3 <br>
+        ...
+     </div>
+
+   Ideia:
+   - Tornar esse container multi-coluna com column-count.
+   - Remover scroll interno e altura fixa (isso quebra column-count).
+   - Deixar checkbox e texto na mesma linha.
+*/
+
+form.row.g-2.mb-3 .p-2.border.rounded {
+    background-color: #f9faff;
+    border: 1px solid #cfd8ed !important;
+    border-radius: .5rem !important;
+    padding: .75rem !important;
+
+    /* multi-coluna */
+    column-count: 4;          /* ajusta pra 3 se quiser menos colunas, 5 se quiser mais apertado */
+    column-gap: 24px;
+
+    /* importante: sem altura fixa / sem scroll interno
+       senão o navegador ignora as colunas e empilha tudo em uma */
+    max-height: none !important;
+    overflow-y: visible !important;
+
+    /* tipografia dos itens */
+    font-size: .8rem;
+    font-weight: 500;
+    color: #1f2d3d;
+    line-height: 1.4rem;
+
+    /* garante que nenhuma regra anterior force grid/flex aqui */
+    display: block !important;
+}
+
+/* checkbox dos credores */
+form.row.g-2.mb-3 .p-2.border.rounded input[type="checkbox"] {
+    accent-color: #4c79ff;
+    width: 14px;
+    height: 14px;
+    vertical-align: middle;
+    margin-right: .5rem;  /* espaço entre quadradinho e texto */
+    cursor: pointer;
+    display: inline-block;
+}
+
+/* texto logo após o checkbox (a sigla) */
+form.row.g-2.mb-3 .p-2.border.rounded input[type="checkbox"] + * {
+    display: inline-block;
+    vertical-align: middle;
+    white-space: nowrap;
+    font-size: .8rem;
+    font-weight: 500;
+    color: #1f2d3d;
+}
+
+/* cada <br> no HTML vira apenas "quebra + espacinho" */
+form.row.g-2.mb-3 .p-2.border.rounded br {
+    display: block;
+    line-height: 0;
+    margin-bottom: 6px; /* espaço vertical entre itens da MESMA coluna */
+    content: "";
+}
+
+/* ====================================
+   TABELAS (tb_repasse, tb_repassevr, etc)
+   ==================================== */
+
+/* tabela base */
+.table.table-sm {
+    font-size: .8rem;
+    color: #1f2d3d;
+    min-width: 1000px; /* se ficar muito larga, deixe a tabela dentro de .panel p/ scroll-x */
+    background-color: #fff;
+    border-collapse: collapse;
+}
+
+/* cabeçalho fixo/visível */
+.table-sticky thead {
+    background-color: #eef2f9;
+    color: #1f2d3d;
+    border-bottom: 2px solid #cdd5ea;
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    box-shadow: 0 2px 4px rgba(31,45,61,.08);
+}
+
+.table-sticky th {
+    font-size: .7rem;
+    font-weight: 600;
+    white-space: nowrap;
+    vertical-align: middle;
+    padding: .5rem .6rem !important;
+    color: #1f2d3d;
+}
+
+/* corpo da tabela */
+.table-sticky td {
+    vertical-align: middle;
+    padding: .45rem .6rem !important;
+    line-height: 1.2rem;
+    border-color: #e6ebf5 !important;
+    background-color: #fff;
+    max-width: 260px;
+    word-break: break-word;
+    border-top: 1px solid #e6ebf5;
+}
+
+/* zebra alternada */
+.table-zebra tbody tr:nth-child(even) td {
+    background-color: #f9faff;
+}
+
+/* alinhar colunas numéricas p/ direita (normalmente as últimas tipo "vlr repasse") */
+.table-zebra td:nth-last-child(2),
+.table-zebra td:nth-last-child(3) {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+/* última coluna "enviado" / status */
+.table-zebra td:last-child {
+    font-weight: 600;
+    text-align: center;
+    min-width: 48px;
+    color: #4a5873;
+}
+
+/* highlight linha quando checkbox (coluna da esquerda) está marcado
+   OBS: :has() já funciona em Chrome/Edge/Firefox modernos */
+.table-zebra tbody tr:has(input[type="checkbox"]:checked) td {
+    background-color: #e8f0ff !important;
+    box-shadow: inset 0 0 0 9999px rgba(76,121,255,.08);
+}
+
+/* estilo dos checkboxes da tabela, incluindo o "check all" do header */
+.js-checkall,
+.table-zebra input[type="checkbox"] {
+    cursor: pointer;
+    accent-color: #4c79ff;
+    width: 14px;
+    height: 14px;
+}
+
+/* linha "Sem dados" da tabela */
+.table-zebra tbody tr td.text-muted {
+    background-color: #fff !important;
+    font-size: .8rem;
+    color: #7a889f !important;
+    text-align: center;
+}
+
+/* ====================================
+   BLOCO FINAL (ENVIO / CATEGORIA / ETC)
+   alvo: <form method="post"> ... <div class="col-12 d-flex flex-wrap gap-2 align-items-end"> ... </div>
+   ==================================== */
+form[method="post"] .col-12.d-flex.flex-wrap.gap-2.align-items-end {
+    background-color: #ffffff;
+    border: 1px solid #dce3ef;
+    border-radius: .6rem;
+    box-shadow:
+        0 8px 16px -4px rgba(31,45,61,.08),
+        0 2px 6px rgba(31,45,61,.04);
+    padding: .75rem 1rem;
+    margin-top: 1rem;
+}
+
+/* inputs desse bloco (categoria, centro de custo, etc) */
+form[method="post"] .col-12.d-flex.flex-wrap.gap-2.align-items-end .form-control {
+    min-width: 200px;
+    font-size: .8rem;
+    line-height: 1.2rem;
+    padding: .45rem .6rem;
+    border-radius: .4rem;
+    border: 1px solid #bfc9dd;
+    background-color: #fff;
+}
+
+form[method="post"] .col-12.d-flex.flex-wrap.gap-2.align-items-end .form-control:focus {
+    border-color: #4c79ff;
+    box-shadow: 0 0 0 2px rgba(76,121,255,.25);
+    outline: 0;
+}
+
+/* botão verde "Enviar remessa" */
+form[method="post"] .col-12.d-flex.flex-wrap.gap-2.align-items-end .btn.btn-success {
+    background-image: linear-gradient(to right, #1e9e49, #2dc86a);
+    border: 0;
+    box-shadow: 0 4px 10px rgba(25,143,64,.3);
+    font-weight: 600;
+    font-size: .8rem;
+    line-height: 1.1rem;
+    padding: .6rem 1rem;
+    border-radius: .45rem;
+    min-width: 140px;
+    text-transform: uppercase;
+    letter-spacing: .03em;
+    color: #fff;
+}
+form[method="post"] .col-12.d-flex.flex-wrap.gap-2.align-items-end .btn.btn-success:hover {
+    filter: brightness(1.05);
+}
+
+
+/* ===== reposicionar "Marcar/Desmarcar todos" ===== */
+
+/* form do topo precisa ser referência pro posicionamento absoluto */
+form.row.g-2.mb-3 {
+    position: relative;
+}
+
+
+
+/* botão/link de marcar/desmarcar */
+#toggle-credores {
+    position: absolute;
+    right: 1rem;        /* gruda no lado direito do card */
+    top: 210px;         /* altura vertical aproximada. ajusta se ficar muito pra cima/baixo */
+
+    background: #fff;
+    border: 1px solid #4c79ff;
+    border-radius: .4rem;
+    padding: .4rem .6rem;
+    line-height: 1rem;
+
+    font-size: .75rem;
+    font-weight: 600;
+    color: #4c79ff;
+    text-decoration: none;
+    box-shadow: 0 4px 10px rgba(76,121,255,.15);
+    cursor: pointer;
+}
+
+/* hover visual */
+#toggle-credores:hover {
+    text-decoration: none;
+    filter: brightness(1.05);
+}

@@ -1,0 +1,51 @@
+
+{% extends "base.html" %}
+{% block title %}Entrar • CobNibo Sync{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center justify-content-center" style="min-height: calc(100vh - 56px - 48px);">
+  <div class="card shadow-sm" style="width: 100%; max-width: 420px; border-radius: 16px;">
+    <div class="card-body p-4">
+      <div class="text-center mb-3">
+        <div class="badge bg-primary-subtle text-primary fw-bold rounded-pill px-3 py-2" style="border:1px solid rgba(13,110,253,.25)">
+          DSR
+        </div>
+        <h5 class="mt-3 mb-1">Acessar o DSR Credcom Hub</h5>
+        <small class="text-secondary">Hub Operacional Credcom</small>
+      </div>
+
+      <form method="post" novalidate>
+        {% csrf_token %}
+        {% if form.non_field_errors %}
+          <div class="alert alert-danger py-2">{{ form.non_field_errors }}</div>
+        {% endif %}
+
+        <div class="mb-3">
+          <label for="id_username" class="form-label">Usuário</label>
+          <input type="text" name="{{ form.username.name }}" id="id_username"
+                 value="{{ form.username.value|default_if_none:'' }}"
+                 class="form-control form-control-lg" autocomplete="username" required>
+        </div>
+
+        <div class="mb-3">
+          <label for="id_password" class="form-label">Senha</label>
+          <input type="password" name="{{ form.password.name }}" id="id_password"
+                 class="form-control form-control-lg" autocomplete="current-password" required>
+        </div>
+
+        <button class="btn btn-primary btn-lg w-100">Entrar</button>
+      </form>
+
+      <div class="mt-4 text-center text-secondary small">
+        <div class="mb-1">Precisa de ajuda? <strong>Suporte DSR</strong></div>
+        <div>E-mail: <a href="mailto:danielsousaof1217@gmail.com">danielsousaof1217@gmail.com</a> • WhatsApp: <a href="tel:+5562996713346">+55 62 9 9671-3346</a></div>
+        <hr class="my-3">
+        <div>
+Este sistema integra dados financeiros, automatiza rotinas operacionais e centraliza a gestão de tarefas da <strong>Credcom</strong>, conectando informações do <strong>Cobmais</strong> ao <strong>Nibo</strong> e facilitando o controle de repasses, contas a receber, contas a pagar e fluxos internos.
+</div>
+
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card p-4 shadow-sm" style="max-width: 720px; border-radius:16px;">
+  <h3 class="mb-2">Deletar tarefa</h3>
+  <p>Tem certeza que quer deletar <b>{{ tarefa.titulo }}</b>?</p>
+
+  <form method="post">
+    {% csrf_token %}
+    <input type="hidden" name="next" value="{{ request.GET.next|default:request.META.HTTP_REFERER|default:'' }}">
+    <button class="btn btn-danger" type="submit">Sim, deletar</button>
+    <a class="btn btn-outline-secondary" href="{{ request.GET.next|default:'/' }}">Cancelar</a>
+  </form>
+</div>
+{% endblock %}

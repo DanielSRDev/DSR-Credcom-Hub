@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card shadow-sm" style="max-width: 820px; border-radius: 16px;">
+  <div class="card-body p-4">
+    <div class="d-flex align-items-center justify-content-between mb-2">
+      <div>
+        <h4 class="mb-0">Anexos</h4>
+        <div class="text-secondary small">
+          Tarefa: <b>{{ tarefa.titulo }}</b> — Para: <b>{{ tarefa.atribuida_para.username }}</b>
+        </div>
+      </div>
+      <a class="btn btn-outline-secondary" href="{{ request.GET.next|default:'/gestao/' }}">Voltar</a>
+    </div>
+
+    <hr class="my-3">
+
+    {% if anexos %}
+      <div class="list-group">
+        {% for a in anexos %}
+          <div class="list-group-item d-flex align-items-center justify-content-between">
+            <div>
+              <div class="fw-semibold">{{ a.nome_original|default:a.arquivo.name }}</div>
+              <div class="small text-secondary">
+                Enviado por {{ a.enviado_por.username|default:"-" }} em {{ a.enviado_em|date:"d/m/Y H:i" }}
+              </div>
+            </div>
+            <a class="btn btn-sm btn-outline-primary" href="{% url 'gestao:anexo_download' a.id %}">Abrir</a>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="text-secondary">Nenhum anexo nessa tarefa.</div>
+    {% endif %}
+
+  </div>
+</div>
+
+{% endblock %}

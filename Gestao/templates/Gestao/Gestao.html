@@ -1,0 +1,299 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block content %}
+<link rel="stylesheet" href="{% static 'css/Gestao.css' %}">
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+
+<div class="g-header">
+  <div>
+    <h2 class="g-title">Gestão de Tarefas</h2>
+    <div class="g-sub">Aberta • Executando • Finalizada — com prazos, criador, comentários e anexos.</div>
+  </div>
+
+  {% if pode_criar %}
+    <a class="btn btn-primary" href="{% url 'gestao:criar' %}?next={{ request.get_full_path|urlencode }}">+ Nova tarefa</a>
+  {% endif %}
+</div>
+
+<form method="get" class="filter-bar mb-3">
+  <div class="row g-2 align-items-end">
+    <div class="col-md-3">
+      <label class="form-label small text-secondary">Prazo de</label>
+      <input type="date" name="data_ini" value="{{ f_data_ini }}" class="form-control">
+    </div>
+
+    <div class="col-md-3">
+      <label class="form-label small text-secondary">Até</label>
+      <input type="date" name="data_fim" value="{{ f_data_fim }}" class="form-control">
+    </div>
+
+    <div class="col-md-4">
+      <label class="form-label small text-secondary">Responsável</label>
+      <select name="user" class="form-select">
+        <option value="">Todos</option>
+        {% for u in usuarios %}
+          <option value="{{ u.id }}" {% if f_user|add:"" == u.id|add:"" %}selected{% endif %}>
+            {{ u.username }}
+          </option>
+        {% endfor %}
+      </select>
+      <div class="small text-secondary mt-1">Se você não for gestor, o filtro trava em você.</div>
+    </div>
+
+    <div class="col-md-2 d-flex gap-2">
+      <button class="btn btn-primary w-100" type="submit">Filtrar</button>
+      <a class="btn btn-outline-secondary w-100" href="{% url 'gestao:quadro' %}">Limpar</a>
+    </div>
+  </div>
+</form>
+
+<div class="g-grid">
+
+  <!-- ABERTAS -->
+  <section class="g-col">
+    <div class="g-col-header">
+      <h4>Abertas</h4>
+      <span class="badge bg-secondary">{{ abertas|length }}</span>
+    </div>
+
+    <div id="lista-abertas" class="g-list">
+      {% for t in abertas %}
+        <article class="g-card
+          {% if t.prioridade %} prio{% endif %}
+          {% if t.esta_atrasada %} late
+          {% elif t.vencendo %} warn
+          {% else %} ok
+          {% endif %}"
+          data-id="{{ t.id }}"
+        >
+          <div class="g-card-top">
+            <div class="g-card-title">
+              {% if t.prioridade %}<span class="g-prio-badge">PRIORIDADE</span>{% endif %}
+              {{ t.titulo }}
+            </div>
+
+            <div class="g-card-actions">
+              <a class="icon-btn" title="Detalhes" href="{% url 'gestao:detalhe' t.id %}?next={{ request.get_full_path|urlencode }}">👁️</a>
+
+              <a class="icon-btn" title="Anexos" href="{% url 'gestao:anexos' t.id %}?next={{ request.get_full_path|urlencode }}">
+                📎{% if t.anexos_count %}<span class="g-clip-count">{{ t.anexos_count }}</span>{% endif %}
+              </a>
+
+              <a class="icon-btn" title="Comentários" href="{% url 'gestao:detalhe' t.id %}?next={{ request.get_full_path|urlencode }}">
+                💬{% if t.comentarios_count %}<span class="g-clip-count">{{ t.comentarios_count }}</span>{% endif %}
+              </a>
+
+              {% if pode_prioridade %}
+                <form method="post" action="{% url 'gestao:prioridade' t.id %}" style="display:inline;">
+                  {% csrf_token %}
+                  <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                  <button type="submit" class="icon-btn" title="Marcar prioridade" style="border:none;background:transparent;">🚩</button>
+                </form>
+              {% endif %}
+
+              {% if pode_editar %}
+                <a class="icon-btn" title="Editar" href="{% url 'gestao:editar' t.id %}?next={{ request.get_full_path|urlencode }}">✏️</a>
+              {% endif %}
+
+              {% if pode_deletar %}
+                <a class="icon-btn" title="Deletar" href="{% url 'gestao:deletar' t.id %}?next={{ request.get_full_path|urlencode }}">🗑️</a>
+              {% endif %}
+            </div>
+          </div>
+
+          {% if t.descricao %}
+            <div class="g-card-desc">{{ t.descricao|truncatechars:220 }}</div>
+          {% endif %}
+
+          <div class="g-card-meta">
+            <div><span class="muted">Criado:</span> <b>{{ t.criada_em|date:"d/m/Y H:i" }}</b> <span class="muted">por</span> <b>{{ t.criada_por.username|default:"-" }}</b></div>
+            <div><span class="muted">Prazo:</span> <b>{{ t.prazo|date:"d/m/Y H:i" }}</b></div>
+            <div><span class="muted">Para:</span> <b>{{ t.atribuida_para.username }}</b></div>
+          </div>
+
+          <div class="g-card-bottom">
+            <form method="post" action="{% url 'gestao:executando' t.id %}">
+              {% csrf_token %}
+              <input type="hidden" name="next" value="{{ request.get_full_path }}">
+              <button class="btn btn-sm btn-outline-success" type="submit">Marcar EXECUTANDO</button>
+            </form>
+
+            <form method="post" action="{% url 'gestao:toggle' t.id %}">
+              {% csrf_token %}
+              <input type="hidden" name="next" value="{{ request.get_full_path }}">
+              <button class="btn btn-sm btn-outline-primary" type="submit">Finalizar</button>
+            </form>
+          </div>
+        </article>
+      {% empty %}
+        <div class="g-empty">Sem tarefas abertas.</div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <!-- EXECUTANDO -->
+  <section class="g-col">
+    <div class="g-col-header">
+      <h4>Executando</h4>
+      <span class="badge bg-success">{{ executando|length }}</span>
+    </div>
+
+    <div class="g-list">
+      {% for t in executando %}
+        <article class="g-card exec {% if t.prioridade %} prio{% endif %}">
+          <div class="g-card-top">
+            <div class="g-card-title">
+              {% if t.prioridade %}<span class="g-prio-badge">PRIORIDADE</span>{% endif %}
+              {{ t.titulo }}
+            </div>
+
+            <div class="g-card-actions">
+              <a class="icon-btn" title="Detalhes" href="{% url 'gestao:detalhe' t.id %}?next={{ request.get_full_path|urlencode }}">👁️</a>
+
+              <a class="icon-btn" title="Anexos" href="{% url 'gestao:anexos' t.id %}?next={{ request.get_full_path|urlencode }}">
+                📎{% if t.anexos_count %}<span class="g-clip-count">{{ t.anexos_count }}</span>{% endif %}
+              </a>
+
+              <a class="icon-btn" title="Comentários" href="{% url 'gestao:detalhe' t.id %}?next={{ request.get_full_path|urlencode }}">
+                💬{% if t.comentarios_count %}<span class="g-clip-count">{{ t.comentarios_count }}</span>{% endif %}
+              </a>
+
+              {% if pode_prioridade %}
+                <form method="post" action="{% url 'gestao:prioridade' t.id %}" style="display:inline;">
+                  {% csrf_token %}
+                  <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                  <button type="submit" class="icon-btn" title="Marcar prioridade" style="border:none;background:transparent;">🚩</button>
+                </form>
+              {% endif %}
+            </div>
+          </div>
+
+          {% if t.descricao %}
+            <div class="g-card-desc">{{ t.descricao|truncatechars:220 }}</div>
+          {% endif %}
+
+          <div class="g-card-meta">
+            <div><span class="muted">Criado:</span> <b>{{ t.criada_em|date:"d/m/Y H:i" }}</b> <span class="muted">por</span> <b>{{ t.criada_por.username|default:"-" }}</b></div>
+            <div><span class="muted">Início:</span> <b>{{ t.iniciado_em|date:"d/m/Y H:i"|default:"-" }}</b></div>
+            <div><span class="muted">Prazo:</span> <b>{{ t.prazo|date:"d/m/Y H:i" }}</b></div>
+            <div><span class="muted">Para:</span> <b>{{ t.atribuida_para.username }}</b></div>
+          </div>
+
+          <div class="g-card-bottom">
+            <form method="post" action="{% url 'gestao:executando' t.id %}">
+              {% csrf_token %}
+              <input type="hidden" name="next" value="{{ request.get_full_path }}">
+              <button class="btn btn-sm btn-outline-secondary" type="submit">Voltar p/ Aberta</button>
+            </form>
+
+            <form method="post" action="{% url 'gestao:toggle' t.id %}">
+              {% csrf_token %}
+              <input type="hidden" name="next" value="{{ request.get_full_path }}">
+              <button class="btn btn-sm btn-outline-primary" type="submit">Finalizar</button>
+            </form>
+          </div>
+        </article>
+      {% empty %}
+        <div class="g-empty">Nada em execução agora.</div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <!-- FINALIZADAS -->
+  <section class="g-col">
+    <div class="g-col-header">
+      <h4>Finalizadas</h4>
+      <span class="badge bg-success">{{ feitas|length }}</span>
+    </div>
+
+    <div class="g-list">
+      {% for t in feitas %}
+        <article class="g-card done {% if t.prioridade %} prio{% endif %}">
+          <div class="g-card-top">
+            <div class="g-card-title">
+              {% if t.prioridade %}<span class="g-prio-badge">PRIORIDADE</span>{% endif %}
+              {{ t.titulo }}
+            </div>
+
+            <div class="g-card-actions">
+              <a class="icon-btn" title="Detalhes" href="{% url 'gestao:detalhe' t.id %}?next={{ request.get_full_path|urlencode }}">👁️</a>
+
+              <a class="icon-btn" title="Anexos" href="{% url 'gestao:anexos' t.id %}?next={{ request.get_full_path|urlencode }}">
+                📎{% if t.anexos_count %}<span class="g-clip-count">{{ t.anexos_count }}</span>{% endif %}
+              </a>
+
+              <a class="icon-btn" title="Comentários" href="{% url 'gestao:detalhe' t.id %}?next={{ request.get_full_path|urlencode }}">
+                💬{% if t.comentarios_count %}<span class="g-clip-count">{{ t.comentarios_count }}</span>{% endif %}
+              </a>
+
+              {% if pode_editar %}
+                <a class="icon-btn" title="Editar" href="{% url 'gestao:editar' t.id %}?next={{ request.get_full_path|urlencode }}">✏️</a>
+              {% endif %}
+            </div>
+          </div>
+
+          {% if t.descricao %}
+            <div class="g-card-desc">{{ t.descricao|truncatechars:220 }}</div>
+          {% endif %}
+
+          <div class="g-card-meta">
+            <div><span class="muted">Criado:</span> <b>{{ t.criada_em|date:"d/m/Y H:i" }}</b> <span class="muted">por</span> <b>{{ t.criada_por.username|default:"-" }}</b></div>
+            <div><span class="muted">Final:</span> <b>{{ t.finalizado_em|date:"d/m/Y H:i"|default:"-" }}</b></div>
+            <div><span class="muted">Prazo:</span> <b>{{ t.prazo|date:"d/m/Y H:i" }}</b></div>
+            <div><span class="muted">Para:</span> <b>{{ t.atribuida_para.username }}</b></div>
+          </div>
+
+          <div class="g-card-bottom">
+            <form method="post" action="{% url 'gestao:toggle' t.id %}">
+              {% csrf_token %}
+              <input type="hidden" name="next" value="{{ request.get_full_path }}">
+              <button class="btn btn-sm btn-outline-secondary" type="submit">Reabrir</button>
+            </form>
+          </div>
+        </article>
+      {% empty %}
+        <div class="g-empty">Nada finalizado ainda.</div>
+      {% endfor %}
+    </div>
+  </section>
+
+</div>
+
+<script>
+function getCookie(name) {
+  let cookieValue = null;
+  if (document.cookie && document.cookie !== "") {
+    const cookies = document.cookie.split(";");
+    for (let c of cookies) {
+      c = c.trim();
+      if (c.substring(0, name.length + 1) === (name + "=")) {
+        cookieValue = decodeURIComponent(c.substring(name.length + 1));
+        break;
+      }
+    }
+  }
+  return cookieValue;
+}
+const csrftoken = getCookie("csrftoken");
+
+const lista = document.getElementById("lista-abertas");
+if (lista) {
+  new Sortable(lista, {
+    animation: 150,
+    handle: ".g-card-title",
+    disabled: {{ pode_editar|yesno:"false,true" }} === "true",
+
+    onEnd: async () => {
+      const ids = Array.from(lista.querySelectorAll(".g-card")).map(el => parseInt(el.dataset.id));
+      await fetch("{% url 'gestao:reordenar' %}", {
+        method: "POST",
+        headers: {"Content-Type": "application/json", "X-CSRFToken": csrftoken},
+        body: JSON.stringify({ ids })
+      });
+    }
+  });
+}
+</script>
+
+{% endblock %}
