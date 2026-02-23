@@ -15,24 +15,34 @@
 
     <hr class="my-3">
 
-    {% if anexos %}
-      <div class="list-group">
-        {% for a in anexos %}
-          <div class="list-group-item d-flex align-items-center justify-content-between">
-            <div>
-              <div class="fw-semibold">{{ a.nome_original|default:a.arquivo.name }}</div>
-              <div class="small text-secondary">
-                Enviado por {{ a.enviado_por.username|default:"-" }} em {{ a.enviado_em|date:"d/m/Y H:i" }}
-              </div>
-            </div>
-            <a class="btn btn-sm btn-outline-primary" href="{% url 'gestao:anexo_download' a.id %}">Abrir</a>
-          </div>
-        {% endfor %}
+    <form method="post" enctype="multipart/form-data" action="{% url 'gestao:anexo_upload' tarefa.id %}">
+      {% csrf_token %}
+      <input type="hidden" name="next" value="{{ request.get_full_path }}">
+      <div class="d-flex gap-2">
+        {{ anexo_form.arquivo }}
+        <button class="btn btn-primary btn-sm" type="submit">Enviar</button>
       </div>
-    {% else %}
-      <div class="text-secondary">Nenhum anexo nessa tarefa.</div>
-    {% endif %}
+    </form>
 
+    <div class="mt-3">
+      {% if anexos %}
+        <div class="list-group">
+          {% for a in anexos %}
+            <div class="list-group-item d-flex align-items-center justify-content-between">
+              <div>
+                <div class="fw-semibold">{{ a.nome_original|default:a.arquivo.name }}</div>
+                <div class="small text-secondary">
+                  Enviado por {{ a.enviado_por.username|default:"-" }} em {{ a.enviado_em|date:"d/m/Y H:i" }}
+                </div>
+              </div>
+              <a class="btn btn-sm btn-outline-primary" href="{% url 'gestao:anexo_download' a.id %}">Abrir</a>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="text-secondary">Nenhum anexo.</div>
+      {% endif %}
+    </div>
   </div>
 </div>
 

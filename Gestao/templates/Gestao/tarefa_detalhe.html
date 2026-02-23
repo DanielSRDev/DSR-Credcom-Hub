@@ -16,6 +16,8 @@
         <div class="mt-2">
           {% if tarefa.status == 'feita' %}
             <span class="badge bg-success">Finalizada</span>
+          {% elif tarefa.status == 'executado' %}
+            <span class="badge" style="background:#d63384;">Executado</span>
           {% elif tarefa.status == 'executando' %}
             <span class="badge" style="background:#20c997;">Executando</span>
           {% else %}
@@ -117,23 +119,27 @@
     <hr class="my-4">
 
     <div class="d-flex flex-wrap gap-2">
-      <form method="post" action="{% url 'gestao:executando' tarefa.id %}">
-        {% csrf_token %}
-        <input type="hidden" name="next" value="{{ request.get_full_path }}">
-        <button class="btn btn-outline-success" type="submit">Toggle Executando</button>
-      </form>
-
-      <form method="post" action="{% url 'gestao:toggle' tarefa.id %}">
-        {% csrf_token %}
-        <input type="hidden" name="next" value="{{ request.get_full_path }}">
-        <button class="btn btn-outline-primary" type="submit">Toggle Finalizada</button>
-      </form>
-
-      {% if pode_prioridade %}
-        <form method="post" action="{% url 'gestao:prioridade' tarefa.id %}">
+      {% if pode_executar %}
+        <form method="post" action="{% url 'gestao:executando' tarefa.id %}">
           {% csrf_token %}
           <input type="hidden" name="next" value="{{ request.get_full_path }}">
-          <button class="btn btn-outline-dark" type="submit">Toggle Prioridade</button>
+          <button class="btn btn-outline-success" type="submit">Toggle Executando</button>
+        </form>
+      {% endif %}
+
+      {% if pode_marcar_executado %}
+        <form method="post" action="{% url 'gestao:executado' tarefa.id %}">
+          {% csrf_token %}
+          <input type="hidden" name="next" value="{{ request.get_full_path }}">
+          <button class="btn btn-outline-dark" type="submit">Marcar Executado</button>
+        </form>
+      {% endif %}
+
+      {% if pode_finalizar %}
+        <form method="post" action="{% url 'gestao:toggle' tarefa.id %}">
+          {% csrf_token %}
+          <input type="hidden" name="next" value="{{ request.get_full_path }}">
+          <button class="btn btn-outline-primary" type="submit">Finalizar / Reabrir</button>
         </form>
       {% endif %}
     </div>
