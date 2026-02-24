@@ -13,6 +13,7 @@ urlpatterns = [
     path("ambiente/", views.ambiente, name="ambiente"),
     path("nibo/", include("nibo_panel.urls")),
     path("gestao/", include("Gestao.urls")),
+    path("operacao/", include("operacao.urls")),
 ] + static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
 
 if settings.DEBUG:

@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card shadow-sm" style="border-radius:16px;">
+  <div class="card-body p-4">
+
+    <div class="d-flex justify-content-between align-items-start gap-3">
+      <div>
+        <h4 class="mb-1">{{ tarefa.titulo }}</h4>
+        <div class="text-secondary small">
+          Criado em <b>{{ tarefa.criada_em|date:"d/m/Y H:i" }}</b> por <b>{{ tarefa.criada_por.username|default:"-" }}</b>
+          • Para <b>{{ tarefa.atribuida_para.username }}</b>
+          • Prazo <b>{{ tarefa.prazo|date:"d/m/Y H:i" }}</b>
+        </div>
+
+        <div class="mt-2">
+          {% if tarefa.status == 'feita' %}
+            <span class="badge bg-success">Finalizada</span>
+          {% elif tarefa.status == 'executado' %}
+            <span class="badge" style="background:#d63384;">Executado</span>
+          {% elif tarefa.status == 'executando' %}
+            <span class="badge" style="background:#20c997;">Executando</span>
+          {% else %}
+            <span class="badge bg-primary">Aberta</span>
+          {% endif %}
+
+          {% if tarefa.prioridade %}
+            <span class="badge" style="background:#6f42c1;">PRIORIDADE</span>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="d-flex gap-2">
+        <a class="btn btn-outline-secondary" href="{{ request.GET.next|default:'/operacao/' }}">Voltar</a>
+
+        {% if pode_editar %}
+          <a class="btn btn-outline-primary"
+             href="{% url 'operacao:editar' tarefa.id %}?next={{ request.GET.next|default:'/operacao/'|urlencode }}">
+            Editar
+          </a>
+        {% endif %}
+      </div>
+    </div>
+
+    <hr class="my-3">
+
+    {% if tarefa.descricao %}
+      <h6 class="mb-2">Descrição completa</h6>
+      <div class="p-3 bg-light rounded" style="white-space: pre-line;">{{ tarefa.descricao }}</div>
+    {% endif %}
+
+    <hr class="my-4">
+
+    <div class="row g-3">
+      <div class="col-lg-6">
+        <h6 class="mb-2">Comentários</h6>
+
+        <form method="post" action="{% url 'operacao:comentario_criar' tarefa.id %}">
+          {% csrf_token %}
+          <input type="hidden" name="next" value="{{ request.get_full_path }}">
+          {{ comentario_form.texto }}
+          <div class="mt-2">
+            <button class="btn btn-primary btn-sm" type="submit">Registrar comentário</button>
+          </div>
+        </form>
+
+        <div class="mt-3">
+          {% if comentarios %}
+            <div class="list-group">
+              {% for c in comentarios %}
+                <div class="list-group-item">
+                  <div class="small text-secondary">
+                    {{ c.criado_em|date:"d/m/Y H:i" }} • <b>{{ c.autor.username|default:"-" }}</b>
+                  </div>
+                  <div style="white-space: pre-line;">{{ c.texto }}</div>
+                </div>
+              {% endfor %}
+            </div>
+          {% else %}
+            <div class="text-secondary">Nenhum comentário ainda.</div>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="col-lg-6">
+        <h6 class="mb-2">Anexos</h6>
+
+        <form method="post" enctype="multipart/form-data" action="{% url 'operacao:anexo_upload' tarefa.id %}">
+          {% csrf_token %}
+          <input type="hidden" name="next" value="{{ request.get_full_path }}">
+          <div class="d-flex gap-2">
+            {{ anexo_form.arquivo }}
+            <button class="btn btn-primary btn-sm" type="submit">Enviar</button>
+          </div>
+        </form>
+
+        <div class="mt-3">
+          {% if anexos %}
+            <div class="list-group">
+              {% for a in anexos %}
+                <div class="list-group-item d-flex align-items-center justify-content-between">
+                  <div>
+                    <div class="fw-semibold">{{ a.nome_original|default:a.arquivo.name }}</div>
+                    <div class="small text-secondary">
+                      Enviado por {{ a.enviado_por.username|default:"-" }} em {{ a.enviado_em|date:"d/m/Y H:i" }}
+                    </div>
+                  </div>
+                  <a class="btn btn-sm btn-outline-primary" href="{% url 'operacao:anexo_download' a.id %}">Abrir</a>
+                </div>
+              {% endfor %}
+            </div>
+          {% else %}
+            <div class="text-secondary">Nenhum anexo.</div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <hr class="my-4">
+
+    <div class="d-flex flex-wrap gap-2">
+      {% if pode_executar %}
+        <form method="post" action="{% url 'operacao:executando' tarefa.id %}">
+          {% csrf_token %}
+          <input type="hidden" name="next" value="{{ request.get_full_path }}">
+          <button class="btn btn-outline-success" type="submit">Marcar EXECUTANDO</button>
+        </form>
+      {% endif %}
+
+      {% if pode_marcar_executado %}
+        <form method="post" action="{% url 'operacao:executado' tarefa.id %}">
+          {% csrf_token %}
+          <input type="hidden" name="next" value="{{ request.get_full_path }}">
+          <button class="btn btn-outline-dark" type="submit">Marcar EXECUTADO</button>
+        </form>
+      {% endif %}
+
+      {% if pode_finalizar %}
+        <form method="post" action="{% url 'operacao:toggle' tarefa.id %}">
+          {% csrf_token %}
+          <input type="hidden" name="next" value="{{ request.get_full_path }}">
+          <button class="btn btn-outline-primary" type="submit">Finalizar / Reabrir</button>
+        </form>
+      {% endif %}
+    </div>
+
+  </div>
+</div>
+
+{% endblock %}

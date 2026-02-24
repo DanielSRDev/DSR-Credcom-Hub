@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% load static %}
-
+{% block container_class %}container-fluid px-4{% endblock %}
 {% block content %}
 <link rel="stylesheet" href="{% static 'css/Gestao.css' %}">
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
@@ -29,7 +29,7 @@
     </div>
 
     <div class="col-md-4">
-      <label class="form-label small text-secondary">Responsável</label>
+      <label class="form-label small text-secondary">Responsável: Se você não for gestor, o filtro trava no seu usuário.</label>
       <select name="user" class="form-select">
         <option value="">Todos</option>
         {% for u in usuarios %}
@@ -38,7 +38,6 @@
           </option>
         {% endfor %}
       </select>
-      <div class="small text-secondary mt-1">Se você não for gestor, o filtro trava no seu usuário.</div>
     </div>
 
     <div class="col-md-2 d-flex gap-2">

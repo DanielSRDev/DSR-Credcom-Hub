@@ -1,0 +1,27 @@
+<script>
+  function getCookie(name) {
+    const value = `; ${document.cookie}`;
+    const parts = value.split(`; ${name}=`);
+    if (parts.length === 2) return parts.pop().split(';').shift();
+  }
+
+  const lista = document.getElementById("lista-abertas");
+  if (lista) {
+    Sortable.create(lista, {
+      animation: 150,
+      onEnd: async () => {
+        const ids = [...lista.querySelectorAll("[data-id]")].map(el => el.dataset.id);
+        try{
+          await fetch("{% url 'operacao:reordenar' %}", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-CSRFToken": getCookie("csrftoken"),
+            },
+            body: JSON.stringify({ids})
+          });
+        }catch(e){}
+      }
+    });
+  }
+</script>

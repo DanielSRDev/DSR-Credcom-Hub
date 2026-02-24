@@ -1,10 +1,10 @@
-# Gestao/views.py
 import json
 from datetime import timedelta
-from django.db import models
+
 from django.contrib import messages
 from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
+from django.db import models
 from django.db.models import Max, Count
 from django.http import JsonResponse, HttpResponseForbidden, FileResponse, Http404
 from django.shortcuts import get_object_or_404, redirect, render
@@ -14,13 +14,16 @@ from django.views.decorators.http import require_POST
 
 from .forms import TarefaForm, AnexoForm, ComentarioForm
 from .models import Tarefa, Anexo, Comentario
+from core.decorators import user_in_groups
 
 User = get_user_model()
 
+# -------------------------
+# Decorator do módulo
+# -------------------------
+gestao_required = user_in_groups("GESTAO", "GESTAO_GESTOR", "GESTAO_GESTORA", "GESTAO_USUARIO")
 
-# ============================================================
-# Helpers
-# ============================================================
+
 def go_back(request, fallback="gestao:quadro"):
     nxt = (request.POST.get("next") or request.GET.get("next") or "").strip()
     if nxt:
@@ -33,9 +36,9 @@ def inicio_do_dia(dt):
     return dt.replace(hour=0, minute=0, second=0, microsecond=0)
 
 
-# ============================================================
-# PERMISSÕES
-# ============================================================
+# -------------------------
+# Permissões (Gestão)
+# -------------------------
 def pode_criar(user) -> bool:
     return user.is_authenticated and user.has_perm("Gestao.add_tarefa")
 
@@ -45,6 +48,7 @@ def pode_editar(user) -> bool:
 
 
 def pode_deletar(user) -> bool:
+    # mantém como você já tinha: só superuser
     return user.is_authenticated and user.is_superuser
 
 
@@ -53,13 +57,10 @@ def pode_prioridade(user) -> bool:
 
 
 def pode_ver_tarefa(user, tarefa: Tarefa) -> bool:
-    # gestor vê tudo
     if pode_editar(user):
         return True
     if not user.is_authenticated:
         return False
-
-    # responsável, criador e executor conseguem ver
     return (
         tarefa.atribuida_para_id == user.id
         or tarefa.criada_por_id == user.id
@@ -72,21 +73,18 @@ def pode_anexar(user, tarefa: Tarefa) -> bool:
 
 
 def pode_executar(user, tarefa: Tarefa) -> bool:
-    # só o "Para" pode marcar executando (ou gestor)
     if pode_editar(user):
         return True
     return user.is_authenticated and tarefa.atribuida_para_id == user.id
 
 
 def pode_marcar_executado(user, tarefa: Tarefa) -> bool:
-    # só executor marca executado (ou gestor)
     if pode_editar(user):
         return True
     return user.is_authenticated and tarefa.executor_id == user.id
 
 
 def pode_finalizar(user, tarefa: Tarefa) -> bool:
-    # só quem criou finaliza (ou gestor, se você quiser manter override)
     if pode_editar(user):
         return True
     return user.is_authenticated and tarefa.criada_por_id == user.id
@@ -96,18 +94,18 @@ def pode_finalizar(user, tarefa: Tarefa) -> bool:
 # QUADRO
 # ============================================================
 @login_required
+@gestao_required
 def quadro(request):
     qs = Tarefa.objects.all()
 
-    # quem não é gestor não vê tudo, vê só o que é dele (responsável ou criador)
+    # quem não é gestor não vê tudo
     if not pode_editar(request.user):
         qs = qs.filter(
-            models.Q(atribuida_para=request.user) | models.Q(criada_por=request.user) | models.Q(executor=request.user)
+            models.Q(atribuida_para=request.user)
+            | models.Q(criada_por=request.user)
+            | models.Q(executor=request.user)
         )
 
-    # -------------------------
-    # Filtros (GET)
-    # -------------------------
     f_data_ini = (request.GET.get("data_ini") or "").strip()
     f_data_fim = (request.GET.get("data_fim") or "").strip()
     f_user = (request.GET.get("user") or "").strip()
@@ -132,21 +130,16 @@ def quadro(request):
             else:
                 qs = qs.filter(atribuida_para=request.user)
 
-    # conta anexos e comentários sem N+1
     qs = qs.annotate(
         anexos_count=Count("anexos", distinct=True),
         comentarios_count=Count("comentarios", distinct=True),
     )
 
-    # -------------------------
-    # Colunas
-    # -------------------------
     abertas = qs.filter(status=Tarefa.Status.ABERTA).order_by("-prioridade", "ordem", "prazo")
     executando = qs.filter(status=Tarefa.Status.EXECUTANDO).order_by("-prioridade", "prazo")
     executado = qs.filter(status=Tarefa.Status.EXECUTADO).order_by("-prioridade", "-executado_em", "prazo")
 
-    # finalizadas: por padrão só hoje
-    final = (request.GET.get("final") or "hoje").strip()  # hoje | 7 | 30 | tudo
+    final = (request.GET.get("final") or "hoje").strip()
     agora = timezone.now()
     inicio_hoje = inicio_do_dia(agora)
 
@@ -157,7 +150,6 @@ def quadro(request):
         finalizadas = finalizadas.filter(finalizado_em__gte=agora - timedelta(days=7))
     elif final == "30":
         finalizadas = finalizadas.filter(finalizado_em__gte=agora - timedelta(days=30))
-    # tudo = sem filtro
 
     usuarios = User.objects.filter(is_active=True).order_by("username")
 
@@ -187,6 +179,7 @@ def quadro(request):
 # CRIAR
 # ============================================================
 @login_required
+@gestao_required
 def tarefa_criar(request):
     if not pode_criar(request.user):
         return HttpResponseForbidden("Sem permissão para criar tarefas.")
@@ -197,11 +190,7 @@ def tarefa_criar(request):
             tarefa = form.save(commit=False)
             tarefa.criada_por = request.user
 
-            max_ordem = (
-                Tarefa.objects.filter(status=Tarefa.Status.ABERTA)
-                .aggregate(m=Max("ordem"))["m"]
-                or 0
-            )
+            max_ordem = Tarefa.objects.filter(status=Tarefa.Status.ABERTA).aggregate(m=Max("ordem"))["m"] or 0
             tarefa.ordem = max_ordem + 1
             tarefa.save()
 
@@ -213,10 +202,8 @@ def tarefa_criar(request):
     return render(request, "Gestao/tarefa_form.html", {"form": form, "modo": "Criar"})
 
 
-# ============================================================
-# EDITAR
-# ============================================================
 @login_required
+@gestao_required
 def tarefa_editar(request, pk):
     tarefa = get_object_or_404(Tarefa, pk=pk)
 
@@ -232,17 +219,11 @@ def tarefa_editar(request, pk):
     else:
         form = TarefaForm(instance=tarefa)
 
-    return render(
-        request,
-        "Gestao/tarefa_form.html",
-        {"form": form, "modo": "Editar", "tarefa": tarefa},
-    )
+    return render(request, "Gestao/tarefa_form.html", {"form": form, "modo": "Editar", "tarefa": tarefa})
 
 
-# ============================================================
-# DETALHE (visualizar + comentar + anexar)
-# ============================================================
 @login_required
+@gestao_required
 def tarefa_detalhe(request, pk):
     tarefa = get_object_or_404(Tarefa, pk=pk)
 
@@ -252,9 +233,6 @@ def tarefa_detalhe(request, pk):
     comentarios = tarefa.comentarios.all()
     anexos = tarefa.anexos.all().order_by("-enviado_em")
 
-    comentario_form = ComentarioForm()
-    anexo_form = AnexoForm()
-
     return render(
         request,
         "Gestao/tarefa_detalhe.html",
@@ -262,8 +240,8 @@ def tarefa_detalhe(request, pk):
             "tarefa": tarefa,
             "comentarios": comentarios,
             "anexos": anexos,
-            "comentario_form": comentario_form,
-            "anexo_form": anexo_form,
+            "comentario_form": ComentarioForm(),
+            "anexo_form": AnexoForm(),
             "pode_editar": pode_editar(request.user),
             "pode_prioridade": pode_prioridade(request.user),
             "pode_executar": pode_executar(request.user, tarefa),
@@ -273,10 +251,8 @@ def tarefa_detalhe(request, pk):
     )
 
 
-# ============================================================
-# DELETAR
-# ============================================================
 @login_required
+@gestao_required
 def tarefa_deletar(request, pk):
     tarefa = get_object_or_404(Tarefa, pk=pk)
 
@@ -291,10 +267,8 @@ def tarefa_deletar(request, pk):
     return render(request, "Gestao/tarefa_delete.html", {"tarefa": tarefa})
 
 
-# ============================================================
-# FINALIZAR / REABRIR (SÓ CRIADOR)
-# ============================================================
 @login_required
+@gestao_required
 @require_POST
 def tarefa_toggle_status(request, pk):
     tarefa = get_object_or_404(Tarefa, pk=pk)
@@ -312,10 +286,8 @@ def tarefa_toggle_status(request, pk):
     return go_back(request)
 
 
-# ============================================================
-# EXECUTANDO (SÓ RESPONSÁVEL)
-# ============================================================
 @login_required
+@gestao_required
 @require_POST
 def tarefa_toggle_executando(request, pk):
     tarefa = get_object_or_404(Tarefa, pk=pk)
@@ -324,7 +296,6 @@ def tarefa_toggle_executando(request, pk):
         return HttpResponseForbidden("Somente o responsável pode marcar como executando.")
 
     if tarefa.status == Tarefa.Status.EXECUTANDO:
-        # volta pra aberta (mas mantém executor, se quiser manter histórico)
         tarefa.status = Tarefa.Status.ABERTA
         tarefa.save(update_fields=["status", "atualizado_em"])
     else:
@@ -334,10 +305,8 @@ def tarefa_toggle_executando(request, pk):
     return go_back(request)
 
 
-# ============================================================
-# EXECUTADO (ROSA) - SÓ EXECUTOR
-# ============================================================
 @login_required
+@gestao_required
 @require_POST
 def tarefa_marcar_executado(request, pk):
     tarefa = get_object_or_404(Tarefa, pk=pk)
@@ -345,39 +314,31 @@ def tarefa_marcar_executado(request, pk):
     if not pode_marcar_executado(request.user, tarefa):
         return HttpResponseForbidden("Somente o executor pode marcar como executado.")
 
-    if tarefa.status == Tarefa.Status.FEITA:
-        return go_back(request)
+    if tarefa.status != Tarefa.Status.FEITA:
+        tarefa.marcar_executado()
+        tarefa.save(update_fields=["status", "executado_em", "atualizado_em"])
 
-    tarefa.marcar_executado()
-    tarefa.save(update_fields=["status", "executado_em", "atualizado_em"])
     return go_back(request)
 
 
-# ============================================================
-# REORDENAR (somente ABERTAS)
-# ============================================================
 @login_required
+@gestao_required
 @require_POST
 def tarefa_reordenar(request):
     if not pode_editar(request.user):
         return JsonResponse({"ok": False, "error": "Sem permissão."}, status=403)
 
-    try:
-        payload = json.loads(request.body.decode("utf-8"))
-        ids = payload.get("ids", [])
+    payload = json.loads(request.body.decode("utf-8"))
+    ids = payload.get("ids", [])
 
-        for i, tid in enumerate(ids, start=1):
-            Tarefa.objects.filter(id=tid, status=Tarefa.Status.ABERTA).update(ordem=i)
+    for i, tid in enumerate(ids, start=1):
+        Tarefa.objects.filter(id=tid, status=Tarefa.Status.ABERTA).update(ordem=i)
 
-        return JsonResponse({"ok": True})
-    except Exception as e:
-        return JsonResponse({"ok": False, "error": str(e)}, status=400)
+    return JsonResponse({"ok": True})
 
 
-# ============================================================
-# PRIORIDADE
-# ============================================================
 @login_required
+@gestao_required
 @require_POST
 def tarefa_toggle_prioridade(request, pk):
     tarefa = get_object_or_404(Tarefa, pk=pk)
@@ -387,14 +348,11 @@ def tarefa_toggle_prioridade(request, pk):
 
     tarefa.prioridade = not bool(tarefa.prioridade)
     tarefa.save(update_fields=["prioridade", "atualizado_em"])
-
     return go_back(request)
 
 
-# ============================================================
-# ANEXOS (LISTA)
-# ============================================================
 @login_required
+@gestao_required
 def tarefa_anexos(request, pk):
     tarefa = get_object_or_404(Tarefa, pk=pk)
 
@@ -402,14 +360,11 @@ def tarefa_anexos(request, pk):
         return HttpResponseForbidden("Sem permissão.")
 
     anexos = tarefa.anexos.all().order_by("-enviado_em")
-    anexo_form = AnexoForm()
-    return render(request, "Gestao/tarefa_anexos.html", {"tarefa": tarefa, "anexos": anexos, "anexo_form": anexo_form})
+    return render(request, "Gestao/tarefa_anexos.html", {"tarefa": tarefa, "anexos": anexos, "anexo_form": AnexoForm()})
 
 
-# ============================================================
-# ANEXO UPLOAD
-# ============================================================
 @login_required
+@gestao_required
 @require_POST
 def anexo_upload(request, pk):
     tarefa = get_object_or_404(Tarefa, pk=pk)
@@ -419,21 +374,19 @@ def anexo_upload(request, pk):
 
     form = AnexoForm(request.POST, request.FILES)
     if form.is_valid():
-        anexo = form.save(commit=False)
-        anexo.tarefa = tarefa
-        anexo.enviado_por = request.user
-        anexo.save()
+        a = form.save(commit=False)
+        a.tarefa = tarefa
+        a.enviado_por = request.user
+        a.save()
         messages.success(request, "Anexo enviado.")
     else:
-        messages.error(request, "Falha ao enviar anexo. Verifique o arquivo.")
+        messages.error(request, "Falha ao enviar anexo.")
 
     return go_back(request)
 
 
-# ============================================================
-# ANEXO DOWNLOAD
-# ============================================================
 @login_required
+@gestao_required
 def anexo_download(request, anexo_id):
     anexo = get_object_or_404(Anexo, pk=anexo_id)
     tarefa = anexo.tarefa
@@ -444,17 +397,11 @@ def anexo_download(request, anexo_id):
     if not anexo.arquivo:
         raise Http404("Arquivo não encontrado.")
 
-    return FileResponse(
-        anexo.arquivo.open("rb"),
-        as_attachment=False,
-        filename=anexo.nome_original or "anexo",
-    )
+    return FileResponse(anexo.arquivo.open("rb"), as_attachment=False, filename=anexo.nome_original or "anexo")
 
 
-# ============================================================
-# COMENTÁRIO
-# ============================================================
 @login_required
+@gestao_required
 @require_POST
 def comentario_criar(request, pk):
     tarefa = get_object_or_404(Tarefa, pk=pk)

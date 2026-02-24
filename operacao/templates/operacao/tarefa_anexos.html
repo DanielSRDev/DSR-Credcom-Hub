@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card shadow-sm" style="border-radius:16px;">
+  <div class="card-body p-4">
+
+    <div class="d-flex justify-content-between align-items-center">
+      <div>
+        <h4 class="mb-1">Anexos</h4>
+        <div class="text-secondary small">
+          Chamado: <b>{{ tarefa.titulo }}</b>
+        </div>
+      </div>
+
+      <a class="btn btn-outline-secondary" href="{{ request.GET.next|default:'/operacao/' }}">Voltar</a>
+    </div>
+
+    <hr class="my-3">
+
+    <form method="post" enctype="multipart/form-data" action="{% url 'operacao:anexo_upload' tarefa.id %}">
+      {% csrf_token %}
+      <input type="hidden" name="next" value="{{ request.GET.next|default:'/operacao/' }}">
+      <div class="row g-2">
+        <div class="col-md-8">
+          {{ anexo_form.arquivo }}
+        </div>
+        <div class="col-md-4 d-grid">
+          <button class="btn btn-primary" type="submit">Enviar</button>
+        </div>
+      </div>
+    </form>
+
+    <div class="mt-4">
+      {% if anexos %}
+        <div class="list-group">
+          {% for a in anexos %}
+            <div class="list-group-item d-flex align-items-center justify-content-between">
+              <div>
+                <div class="fw-semibold">{{ a.nome_original|default:a.arquivo.name }}</div>
+                <div class="small text-secondary">
+                  Enviado por {{ a.enviado_por.username|default:"-" }} em {{ a.enviado_em|date:"d/m/Y H:i" }}
+                </div>
+              </div>
+              <a class="btn btn-sm btn-outline-primary" href="{% url 'operacao:anexo_download' a.id %}">Abrir</a>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="text-secondary">Nenhum anexo.</div>
+      {% endif %}
+    </div>
+
+  </div>
+</div>
+
+{% endblock %}

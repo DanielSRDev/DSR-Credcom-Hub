@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card shadow-sm" style="border-radius:16px;">
+  <div class="card-body p-4">
+    <div class="d-flex align-items-center justify-content-between">
+      <h4 class="mb-0">{{ titulo }}</h4>
+      <a class="btn btn-outline-secondary" href="{{ request.GET.next|default:'/operacao/' }}">Voltar</a>
+    </div>
+
+    <hr class="my-3">
+
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="next" value="{{ request.GET.next|default:'/operacao/' }}">
+
+      <div class="mb-3">
+        <label class="form-label">Título</label>
+        {{ form.titulo }}
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label">Descrição</label>
+        {{ form.descricao }}
+      </div>
+
+      <div class="row g-3">
+        <div class="col-md-6">
+          <label class="form-label">Prazo</label>
+          {{ form.prazo }}
+          <div class="form-text">Dica: use data e hora.</div>
+        </div>
+
+        <div class="col-md-6">
+          <label class="form-label">Atribuir para</label>
+          {{ form.atribuida_para }}
+          <div class="form-text">Supervisor só vê a equipe dele.</div>
+        </div>
+      </div>
+
+      <div class="mt-4 d-flex gap-2">
+        <button class="btn btn-primary" type="submit">Salvar</button>
+        <a class="btn btn-outline-secondary" href="{{ request.GET.next|default:'/operacao/' }}">Cancelar</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% endblock %}

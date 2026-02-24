@@ -20,6 +20,18 @@
       </div>
       {% endif %}
 
+      {% if pode_operacao %}
+      <div class="col-md-6">
+        <div class="card shadow-sm h-100" style="border-radius:16px;">
+          <div class="card-body p-4">
+            <h4 class="mb-2">🧭 Operação</h4>
+            <p class="text-secondary">Chamados operacionais por equipe, executor e evidência de tempo.</p>
+            <a class="btn btn-primary" href="/operacao/">Entrar na Operação</a>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
       {% if pode_nibo %}
       <div class="col-md-6">
         <div class="card shadow-sm h-100" style="border-radius:16px;">
