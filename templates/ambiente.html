@@ -7,9 +7,9 @@
     <h2 class="mb-1">Escolha o ambiente</h2>
     <p class="text-secondary mb-4">Aparece só o que seu usuário tem permissão.</p>
 
-    <div class="row g-3">
-      {% if pode_gestao %}
-      <div class="col-md-6">
+    <div class="row g-3 justify-content-center">
+      {% if pode_ver_gestao %}
+      <div class="col-md-6 col-lg-4">
         <div class="card shadow-sm h-100" style="border-radius:16px;">
           <div class="card-body p-4">
             <h4 class="mb-2">📋 Gestão</h4>
@@ -20,8 +20,8 @@
       </div>
       {% endif %}
 
-      {% if pode_operacao %}
-      <div class="col-md-6">
+      {% if pode_ver_operacao %}
+      <div class="col-md-6 col-lg-4">
         <div class="card shadow-sm h-100" style="border-radius:16px;">
           <div class="card-body p-4">
             <h4 class="mb-2">🧭 Operação</h4>
@@ -32,13 +32,15 @@
       </div>
       {% endif %}
 
-      {% if pode_nibo %}
-      <div class="col-md-6">
+      {% if pode_ver_nibo %}
+      <div class="col-md-6 col-lg-4">
         <div class="card shadow-sm h-100" style="border-radius:16px;">
           <div class="card-body p-4">
             <h4 class="mb-2">💰 Nibo</h4>
             <p class="text-secondary">Painel de repasses, despesas, contas e remessas.</p>
-            <a class="btn btn-primary" href="/nibo/">Entrar no Nibo</a>
+
+            {# se teu link certo é o painel, usa namespace correto #}
+            <a class="btn btn-primary" href="{% url 'nibo_panel:painel' %}">Entrar no Nibo</a>
           </div>
         </div>
       </div>

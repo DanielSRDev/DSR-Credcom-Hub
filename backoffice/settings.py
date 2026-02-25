@@ -71,7 +71,7 @@ TEMPLATES = [
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
                 # NOVO:
-                "core.context_processors.modulos_permitidos",
+                "core.context_processors.nav_permissoes",
             ],
         },
     },

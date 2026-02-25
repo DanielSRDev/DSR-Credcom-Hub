@@ -146,3 +146,11 @@
   border-left: 6px solid #d63384;
   background: #fde7f3;
 }
+
+
+/* ================= PRIORIDADE SEMPRE VENCE ================= */
+.g-card.prio{
+  border-left: 6px solid #6f42c1 !important;
+  background: rgba(111,66,193,.08) !important;
+  box-shadow: 0 0 0 2px rgba(111,66,193,.25) inset !important;
+}

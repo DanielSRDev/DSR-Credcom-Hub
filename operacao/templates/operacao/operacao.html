@@ -1,10 +1,348 @@
-<script>
-  function getCookie(name) {
-    const value = `; ${document.cookie}`;
-    const parts = value.split(`; ${name}=`);
-    if (parts.length === 2) return parts.pop().split(';').shift();
-  }
+{% extends "base.html" %}
+{% load static %}
 
+{% block container_class %}container-fluid px-4{% endblock %}
+{% block content %}
+
+<link rel="stylesheet" href="{% static 'css/operacao.css' %}">
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+
+<div class="g-header">
+  <div>
+    <h2 class="g-title">Operação</h2>
+    <div class="g-sub">Aberta → Executando → Executado → Finalizada (com prazos, criador, executor e evidência de tempo).</div>
+  </div>
+
+  {% if pode_criar %}
+    <a class="btn btn-primary" href="{% url 'operacao:criar' %}?next={{ request.get_full_path|urlencode }}">+ Novo chamado</a>
+  {% endif %}
+</div>
+
+<form method="get" class="filter-bar mb-3">
+  <div class="row g-2 align-items-end">
+    <div class="col-md-3">
+      <label class="form-label small text-secondary">Prazo de</label>
+      <input type="date" name="data_ini" value="{{ f_data_ini }}" class="form-control">
+    </div>
+
+    <div class="col-md-3">
+      <label class="form-label small text-secondary">Até</label>
+      <input type="date" name="data_fim" value="{{ f_data_fim }}" class="form-control">
+    </div>
+
+    <div class="col-md-4">
+      <label class="form-label small text-secondary">Responsável (se não for gestor, trava no seu usuário)</label>
+      <select name="user" class="form-select">
+        <option value="">Todos</option>
+        {% for u in usuarios %}
+          <option value="{{ u.id }}" {% if f_user|add:"" == u.id|add:"" %}selected{% endif %}>
+            {{ u.username }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="col-md-2 d-flex gap-2">
+      <button class="btn btn-primary w-100" type="submit">Filtrar</button>
+      <a class="btn btn-outline-secondary w-100" href="{% url 'operacao:quadro' %}">Limpar</a>
+    </div>
+  </div>
+</form>
+
+<div class="g-grid-4">
+
+  <!-- ================== ABERTAS ================== -->
+  <section class="g-col">
+    <div class="g-col-header">
+      <h4>Abertas</h4>
+      <span class="badge bg-secondary">{{ abertas|length }}</span>
+    </div>
+
+    <div id="lista-abertas" class="g-list">
+      {% for t in abertas %}
+        <article class="g-card
+          {% if t.prioridade %} prio{% endif %}
+          {% if t.esta_atrasada %} late
+          {% elif t.vencendo %} warn
+          {% else %} ok
+          {% endif %}"
+          data-id="{{ t.id }}"
+        >
+          <div class="g-card-top">
+            <div class="g-card-title">
+              {% if t.prioridade %}
+                <span class="g-prio-badge">PRIORIDADE</span>
+              {% endif %}
+              {{ t.titulo }}
+            </div>
+
+            <div class="g-card-actions">
+              <a class="icon-btn" title="Visualizar" href="{% url 'operacao:detalhe' t.id %}?next={{ request.get_full_path|urlencode }}">👁️</a>
+
+              <a class="icon-btn" title="Anexos" href="{% url 'operacao:anexos' t.id %}?next={{ request.get_full_path|urlencode }}">
+                📎
+                {% if t.anexos_count %}
+                  <span class="g-clip-count">{{ t.anexos_count }}</span>
+                {% endif %}
+              </a>
+
+              <a class="icon-btn" title="Comentários" href="{% url 'operacao:detalhe' t.id %}?next={{ request.get_full_path|urlencode }}">
+                💬
+                {% if t.comentarios_count %}
+                  <span class="g-clip-count">{{ t.comentarios_count }}</span>
+                {% endif %}
+              </a>
+
+              {% if pode_prioridade %}
+                <form method="post" action="{% url 'operacao:prioridade' t.id %}" style="display:inline;">
+                  {% csrf_token %}
+                  <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                  <button type="submit" class="icon-btn" title="Marcar prioridade" style="border:none;background:transparent;">🚩</button>
+                </form>
+              {% endif %}
+
+              {% if pode_editar %}
+                <a class="icon-btn" title="Editar" href="{% url 'operacao:editar' t.id %}?next={{ request.get_full_path|urlencode }}">✏️</a>
+              {% endif %}
+
+              {% if pode_deletar %}
+                <a class="icon-btn" title="Deletar" href="{% url 'operacao:deletar' t.id %}?next={{ request.get_full_path|urlencode }}">🗑️</a>
+              {% endif %}
+            </div>
+          </div>
+
+          {% if t.descricao %}
+            <div class="g-card-desc clamp">{{ t.descricao }}</div>
+          {% endif %}
+
+          <div class="g-card-meta">
+            <div><span class="muted">Criado:</span> <b>{{ t.criada_em|date:"d/m/Y H:i" }}</b> <span class="muted">por</span> <b>{{ t.criada_por.username|default:"-" }}</b></div>
+            <div><span class="muted">Prazo:</span> <b>{{ t.prazo|date:"d/m/Y H:i" }}</b></div>
+            <div><span class="muted">Para:</span> <b>{{ t.atribuida_para.username }}</b></div>
+          </div>
+
+          <div class="g-card-bottom">
+            {% if request.user.id == t.atribuida_para_id or pode_editar %}
+              <form method="post" action="{% url 'operacao:executando' t.id %}">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                <button class="btn btn-sm btn-outline-success" type="submit">Marcar EXECUTANDO</button>
+              </form>
+            {% endif %}
+          </div>
+        </article>
+      {% empty %}
+        <div class="g-empty">Sem chamados abertos.</div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <!-- ================== EXECUTANDO ================== -->
+  <section class="g-col">
+    <div class="g-col-header">
+      <h4>Executando</h4>
+      <span class="badge bg-success">{{ executando|length }}</span>
+    </div>
+
+    <div class="g-list">
+      {% for t in executando %}
+        <article class="g-card exec {% if t.prioridade %} prio{% endif %}">
+          <div class="g-card-top">
+            <div class="g-card-title">
+              {% if t.prioridade %}<span class="g-prio-badge">PRIORIDADE</span>{% endif %}
+              {{ t.titulo }}
+            </div>
+
+            <div class="g-card-actions">
+              <a class="icon-btn" title="Visualizar" href="{% url 'operacao:detalhe' t.id %}?next={{ request.get_full_path|urlencode }}">👁️</a>
+
+              <a class="icon-btn" title="Anexos" href="{% url 'operacao:anexos' t.id %}?next={{ request.get_full_path|urlencode }}">
+                📎
+                {% if t.anexos_count %}
+                  <span class="g-clip-count">{{ t.anexos_count }}</span>
+                {% endif %}
+              </a>
+
+              <a class="icon-btn" title="Comentários" href="{% url 'operacao:detalhe' t.id %}?next={{ request.get_full_path|urlencode }}">
+                💬
+                {% if t.comentarios_count %}
+                  <span class="g-clip-count">{{ t.comentarios_count }}</span>
+                {% endif %}
+              </a>
+            </div>
+          </div>
+
+          {% if t.descricao %}
+            <div class="g-card-desc clamp">{{ t.descricao }}</div>
+          {% endif %}
+
+          <div class="g-card-meta">
+            <div><span class="muted">Criado:</span> <b>{{ t.criada_em|date:"d/m/Y H:i" }}</b> <span class="muted">por</span> <b>{{ t.criada_por.username|default:"-" }}</b></div>
+            <div><span class="muted">Início:</span> <b>{{ t.iniciado_em|date:"d/m/Y H:i"|default:"-" }}</b> <span class="muted">executor:</span> <b>{{ t.executor.username|default:"-" }}</b></div>
+            <div><span class="muted">Prazo:</span> <b>{{ t.prazo|date:"d/m/Y H:i" }}</b></div>
+            <div><span class="muted">Para:</span> <b>{{ t.atribuida_para.username }}</b></div>
+          </div>
+
+          <div class="g-card-bottom">
+            {% if request.user.id == t.executor_id or pode_editar %}
+              <form method="post" action="{% url 'operacao:executado' t.id %}">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                <button class="btn btn-sm btn-outline-dark" type="submit">Marcar EXECUTADO</button>
+              </form>
+            {% endif %}
+          </div>
+        </article>
+      {% empty %}
+        <div class="g-empty">Nada em execução agora.</div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <!-- ================== EXECUTADO ================== -->
+  <section class="g-col">
+    <div class="g-col-header">
+      <h4>Executado</h4>
+      <span class="badge" style="background:#d63384;">{{ executado|length }}</span>
+    </div>
+
+    <div class="g-list">
+      {% for t in executado %}
+        <article class="g-card donebyexec {% if t.prioridade %} prio{% endif %}">
+          <div class="g-card-top">
+            <div class="g-card-title">
+              {% if t.prioridade %}<span class="g-prio-badge">PRIORIDADE</span>{% endif %}
+              {{ t.titulo }}
+            </div>
+
+            <div class="g-card-actions">
+              <a class="icon-btn" title="Visualizar" href="{% url 'operacao:detalhe' t.id %}?next={{ request.get_full_path|urlencode }}">👁️</a>
+
+              <a class="icon-btn" title="Anexos" href="{% url 'operacao:anexos' t.id %}?next={{ request.get_full_path|urlencode }}">
+                📎
+                {% if t.anexos_count %}
+                  <span class="g-clip-count">{{ t.anexos_count }}</span>
+                {% endif %}
+              </a>
+
+              <a class="icon-btn" title="Comentários" href="{% url 'operacao:detalhe' t.id %}?next={{ request.get_full_path|urlencode }}">
+                💬
+                {% if t.comentarios_count %}
+                  <span class="g-clip-count">{{ t.comentarios_count }}</span>
+                {% endif %}
+              </a>
+            </div>
+          </div>
+
+          {% if t.descricao %}
+            <div class="g-card-desc clamp">{{ t.descricao }}</div>
+          {% endif %}
+
+          <div class="g-card-meta">
+            <div><span class="muted">Criado:</span> <b>{{ t.criada_em|date:"d/m/Y H:i" }}</b> <span class="muted">por</span> <b>{{ t.criada_por.username|default:"-" }}</b></div>
+            <div><span class="muted">Executado em:</span> <b>{{ t.executado_em|date:"d/m/Y H:i"|default:"-" }}</b> <span class="muted">por</span> <b>{{ t.executor.username|default:"-" }}</b></div>
+            <div><span class="muted">Prazo:</span> <b>{{ t.prazo|date:"d/m/Y H:i" }}</b></div>
+            <div><span class="muted">Para:</span> <b>{{ t.atribuida_para.username }}</b></div>
+          </div>
+
+          <div class="g-card-bottom">
+            {% if request.user.id == t.criada_por_id or pode_editar %}
+              <form method="post" action="{% url 'operacao:toggle' t.id %}">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                <button class="btn btn-sm btn-outline-success" type="submit">Finalizar</button>
+              </form>
+            {% else %}
+              <div class="small text-secondary">Aguardando finalização do criador.</div>
+            {% endif %}
+          </div>
+        </article>
+      {% empty %}
+        <div class="g-empty">Nada executado ainda.</div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <!-- ================== FINALIZADAS ================== -->
+  <section class="g-col">
+    <div class="g-col-header flex-column align-items-stretch">
+      <div class="d-flex align-items-center justify-content-between">
+        <h4 class="mb-0">Finalizadas</h4>
+
+        <form method="get" class="d-flex gap-2 align-items-center">
+          <input type="hidden" name="data_ini" value="{{ f_data_ini }}">
+          <input type="hidden" name="data_fim" value="{{ f_data_fim }}">
+          <input type="hidden" name="user" value="{{ f_user }}">
+
+          <select name="final" class="form-select form-select-sm" onchange="this.form.submit()" style="width:120px;">
+            <option value="hoje" {% if final == "hoje" %}selected{% endif %}>Hoje</option>
+            <option value="7" {% if final == "7" %}selected{% endif %}>7 dias</option>
+            <option value="30" {% if final == "30" %}selected{% endif %}>30 dias</option>
+            <option value="tudo" {% if final == "tudo" %}selected{% endif %}>Tudo</option>
+          </select>
+
+          <span class="badge bg-success">{{ finalizadas|length }}</span>
+        </form>
+      </div>
+      <div class="small text-secondary mt-1">Por padrão mostra só as de hoje pra não poluir.</div>
+    </div>
+
+    <div class="g-list">
+      {% for t in finalizadas %}
+        <article class="g-card done {% if t.prioridade %} prio{% endif %}">
+          <div class="g-card-top">
+            <div class="g-card-title">
+              {% if t.prioridade %}<span class="g-prio-badge">PRIORIDADE</span>{% endif %}
+              {{ t.titulo }}
+            </div>
+
+            <div class="g-card-actions">
+              <a class="icon-btn" title="Visualizar" href="{% url 'operacao:detalhe' t.id %}?next={{ request.get_full_path|urlencode }}">👁️</a>
+
+              <a class="icon-btn" title="Anexos" href="{% url 'operacao:anexos' t.id %}?next={{ request.get_full_path|urlencode }}">
+                📎
+                {% if t.anexos_count %}
+                  <span class="g-clip-count">{{ t.anexos_count }}</span>
+                {% endif %}
+              </a>
+
+              <a class="icon-btn" title="Comentários" href="{% url 'operacao:detalhe' t.id %}?next={{ request.get_full_path|urlencode }}">
+                💬
+                {% if t.comentarios_count %}
+                  <span class="g-clip-count">{{ t.comentarios_count }}</span>
+                {% endif %}
+              </a>
+            </div>
+          </div>
+
+          {% if t.descricao %}
+            <div class="g-card-desc clamp">{{ t.descricao }}</div>
+          {% endif %}
+
+          <div class="g-card-meta">
+            <div><span class="muted">Criado:</span> <b>{{ t.criada_em|date:"d/m/Y H:i" }}</b> <span class="muted">por</span> <b>{{ t.criada_por.username|default:"-" }}</b></div>
+            <div><span class="muted">Final:</span> <b>{{ t.finalizado_em|date:"d/m/Y H:i"|default:"-" }}</b></div>
+            <div><span class="muted">Para:</span> <b>{{ t.atribuida_para.username }}</b></div>
+          </div>
+
+          <div class="g-card-bottom">
+            {% if request.user.id == t.criada_por_id or pode_editar %}
+              <form method="post" action="{% url 'operacao:toggle' t.id %}">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                <button class="btn btn-sm btn-outline-secondary" type="submit">Reabrir</button>
+              </form>
+            {% endif %}
+          </div>
+        </article>
+      {% empty %}
+        <div class="g-empty">Sem finalizadas nesse filtro.</div>
+      {% endfor %}
+    </div>
+  </section>
+</div>
+
+<script>
   const lista = document.getElementById("lista-abertas");
   if (lista) {
     Sortable.create(lista, {
@@ -16,7 +354,7 @@
             method: "POST",
             headers: {
               "Content-Type": "application/json",
-              "X-CSRFToken": getCookie("csrftoken"),
+              "X-CSRFToken": "{{ csrf_token }}",
             },
             body: JSON.stringify({ids})
           });
@@ -25,3 +363,5 @@
     });
   }
 </script>
+
+{% endblock %}
