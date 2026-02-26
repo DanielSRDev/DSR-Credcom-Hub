@@ -29,4 +29,7 @@ urlpatterns = [
 
     # comentários
     path("comentario/<int:pk>/criar/", views.comentario_criar, name="comentario_criar"),
+
+    # ✅ NOVO: KPIs ao vivo
+    path("partial/kpis/", views.partial_kpis, name="partial_kpis"),
 ]

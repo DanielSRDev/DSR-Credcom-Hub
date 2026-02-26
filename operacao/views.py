@@ -9,7 +9,7 @@ from django.db.models import Count, Q, Max
 from django.http import HttpResponseForbidden, JsonResponse, FileResponse, Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_POST, require_GET
 
 from core.decorators import user_in_groups
 from .forms import TarefaForm, ComentarioForm, AnexoForm
@@ -442,3 +442,35 @@ def reordenar(request):
             t.save(update_fields=["ordem"])
 
     return JsonResponse({"ok": True})
+
+
+# ============================================================
+# KPIs AO VIVO (CARDS DO TOPO)
+# ============================================================
+
+@login_required
+@require_GET
+def partial_kpis(request):
+    qs = queryset_visivel_para(request.user)
+
+    abertas = qs.filter(status="aberta").count()
+    executando = qs.filter(status="executando").count()
+    executado = qs.filter(status="executado").count()
+    finalizadas = qs.filter(status="feita").count()
+
+    agora = timezone.now()
+    atrasadas = qs.exclude(status="feita").filter(prazo__lt=agora).count()
+    vencendo = qs.exclude(status="feita").filter(
+        prazo__gte=agora,
+        prazo__lte=agora + timedelta(hours=24)
+    ).count()
+
+    return render(request, "operacao/partials/kpis.html", {
+        "abertas": abertas,
+        "executando": executando,
+        "executado": executado,
+        "finalizadas": finalizadas,
+        "atrasadas": atrasadas,
+        "vencendo": vencendo,
+        "now": timezone.now(),
+    })

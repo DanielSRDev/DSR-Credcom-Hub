@@ -10,7 +10,7 @@ from django.db.models import Count, Q
 from django.http import FileResponse, Http404, HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_POST, require_GET
 
 from .forms import TarefaForm, ComentarioForm, AnexoForm
 from .models import Tarefa, Comentario, Anexo
@@ -496,6 +496,65 @@ def reordenar(request):
 
     Tarefa.objects.bulk_update(tarefas.values(), ["ordem"])
     return JsonResponse({"ok": True})
+
+def _build_base_filtrado(request):
+    """
+    Mesma regra do quadro:
+    - filtro por data_ini/data_fim/user
+    - se não for gestor, trava no próprio usuário
+    - usuário comum só vê tarefas dele (responsável/criador/executor)
+    """
+    f_data_ini = request.GET.get("data_ini") or ""
+    f_data_fim = request.GET.get("data_fim") or ""
+    f_user = request.GET.get("user") or ""
+
+    base = Tarefa.objects.select_related("criada_por", "atribuida_para", "executor")
+
+    if not pode_editar(request.user):
+        f_user = str(request.user.id)
+
+    if f_user:
+        base = base.filter(atribuida_para_id=f_user)
+
+    if f_data_ini:
+        base = base.filter(prazo__date__gte=f_data_ini)
+    if f_data_fim:
+        base = base.filter(prazo__date__lte=f_data_fim)
+
+    if not pode_editar(request.user):
+        base = base.filter(
+            Q(atribuida_para=request.user) | Q(criada_por=request.user) | Q(executor=request.user)
+        )
+
+    return base
+
+
+@login_required
+@require_GET
+def partial_kpis(request):
+    if not tem_acesso_gestao(request.user):
+        return HttpResponseForbidden("Sem acesso ao módulo Gestão.")
+
+    base = _build_base_filtrado(request)
+
+    abertas = base.filter(status="aberta").count()
+    executando = base.filter(status="executando").count()
+    executado = base.filter(status="executado").count()
+    finalizadas = base.filter(status="feita").count()
+
+    agora = timezone.now()
+    atrasadas = base.exclude(status="feita").filter(prazo__lt=agora).count()
+    vencendo = base.exclude(status="feita").filter(prazo__gte=agora, prazo__lte=agora + timedelta(hours=24)).count()
+
+    return render(request, "Gestao/partials/kpis.html", {
+        "abertas": abertas,
+        "executando": executando,
+        "executado": executado,
+        "finalizadas": finalizadas,
+        "atrasadas": atrasadas,
+        "vencendo": vencendo,
+        "now": timezone.now(),
+    })
 
 
     # ============================================================

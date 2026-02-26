@@ -1,4 +1,3 @@
-# operacao/urls.py
 from django.urls import path
 from . import views
 
@@ -13,18 +12,18 @@ urlpatterns = [
 
     path("detalhe/<int:tarefa_id>/", views.detalhe, name="detalhe"),
 
-    # comentários/anexos
     path("comentario/<int:tarefa_id>/", views.comentario_criar, name="comentario_criar"),
     path("anexos/<int:tarefa_id>/", views.anexos, name="anexos"),
     path("anexo/upload/<int:tarefa_id>/", views.anexo_upload, name="anexo_upload"),
     path("anexo/<int:anexo_id>/", views.anexo_download, name="anexo_download"),
 
-    # status
     path("executando/<int:tarefa_id>/", views.marcar_executando, name="executando"),
     path("executado/<int:tarefa_id>/", views.marcar_executado, name="executado"),
     path("toggle/<int:tarefa_id>/", views.finalizar_reabrir, name="toggle"),
 
-    # prioridade/ordem
     path("prioridade/<int:tarefa_id>/", views.toggle_prioridade, name="prioridade"),
     path("reordenar/", views.reordenar, name="reordenar"),
+
+    # 🔴 NOVO: endpoint para KPIs ao vivo
+    path("partial/kpis/", views.partial_kpis, name="partial_kpis"),
 ]

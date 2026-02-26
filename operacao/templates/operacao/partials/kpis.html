@@ -1,0 +1,37 @@
+<div class="row g-2 mb-2">
+  <div class="col"><div class="card shadow-sm"><div class="card-body p-2">
+    <div class="small text-secondary">Abertas</div>
+    <div class="fs-4 fw-bold">{{ abertas }}</div>
+  </div></div></div>
+
+  <div class="col"><div class="card shadow-sm"><div class="card-body p-2">
+    <div class="small text-secondary">Executando</div>
+    <div class="fs-4 fw-bold">{{ executando }}</div>
+  </div></div></div>
+
+  <div class="col"><div class="card shadow-sm"><div class="card-body p-2">
+    <div class="small text-secondary">Executado</div>
+    <div class="fs-4 fw-bold">{{ executado }}</div>
+  </div></div></div>
+
+  <div class="col"><div class="card shadow-sm"><div class="card-body p-2">
+    <div class="small text-secondary">Finalizadas</div>
+    <div class="fs-4 fw-bold">{{ finalizadas }}</div>
+  </div></div></div>
+
+  <div class="col"><div class="card shadow-sm border border-warning">
+    <div class="card-body p-2">
+      <div class="small text-secondary">Vencendo</div>
+      <div class="fs-4 fw-bold">{{ vencendo }}</div>
+    </div></div></div>
+
+  <div class="col"><div class="card shadow-sm border border-danger">
+    <div class="card-body p-2">
+      <div class="small text-secondary">Atrasadas</div>
+      <div class="fs-4 fw-bold">{{ atrasadas }}</div>
+    </div></div></div>
+</div>
+
+<div class="small text-secondary mb-3">
+  Atualizado: {{ now|date:"H:i:s" }}
+</div>

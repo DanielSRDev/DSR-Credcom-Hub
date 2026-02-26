@@ -357,8 +357,37 @@
       }
     }, 25000);
   </script>
-  {% endif %}
+  {% endif %} 
+  
+  <script>
+    async function liveRefreshOnce(el) {
+      const url = el.getAttribute("data-live-url");
+      if (!url) return;
 
+      try {
+        const r = await fetch(url, { credentials: "same-origin" });
+        if (!r.ok) return;
+        el.innerHTML = await r.text();
+        el.setAttribute("data-live-last", String(Date.now()));
+      } catch (e) {}
+    }
+
+    function startLiveRefresh() {
+      document.querySelectorAll("[data-live-url]").forEach((el) => {
+        if (el.dataset.liveStarted === "1") return; // evita duplicar
+        el.dataset.liveStarted = "1";
+
+        const interval = Number(el.getAttribute("data-live-interval") || 5000);
+
+        liveRefreshOnce(el);
+        el._liveTimer = setInterval(() => liveRefreshOnce(el), interval);
+      });
+    }
+
+    window.addEventListener("load", startLiveRefresh);
+  </script>
+
+  
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   {% block extra_js %}{% endblock %}
 </body>

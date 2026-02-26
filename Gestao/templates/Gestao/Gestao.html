@@ -47,6 +47,12 @@
   </div>
 </form>
 
+<div data-live-url="{% url 'gestao:partial_kpis' %}?{{ request.GET.urlencode }}"
+     data-live-interval="5000">
+  Carregando indicadores...
+</div>
+
+
 <div class="g-grid-4">
   <!-- ================== ABERTAS ================== -->
   <section class="g-col">
