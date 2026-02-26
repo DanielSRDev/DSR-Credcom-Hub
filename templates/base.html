@@ -2,57 +2,335 @@
 <!doctype html>
 <html lang="pt-br">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}DSR Credcom Hub{% endblock %}</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>{% block title %}Credcom Hub{% endblock %}</title>
 
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="{% static 'css/painel.css' %}">
+
   {% block extra_head %}{% endblock %}
 </head>
 
-<body class="bg-light">
+<body>
+  <nav class="navbar navbar-expand-lg" style="background:#2f7df6;">
+    <div class="container-fluid px-3">
+      <a class="navbar-brand d-flex align-items-center gap-2 text-white fw-semibold" href="/ambiente/">
+        <span class="badge rounded-pill bg-white text-primary">DSR</span>
+        Credcom Hub
+      </a>
 
-<nav class="navbar navbar-expand-lg navbar-dark" style="background: linear-gradient(90deg,#1e73ff,#5aa0ff);">
-  <div class="container-fluid">
-    <a class="navbar-brand fw-bold d-flex align-items-center gap-2" href="{% url 'ambiente' %}">
-      <span class="badge bg-primary border border-white rounded-pill px-3 py-2">DSR</span>
-      <span>Credcom Hub</span>
-    </a>
+      <div class="d-flex align-items-center gap-2 ms-auto">
 
-    <div class="ms-auto d-flex align-items-center gap-2">
-      {% if user.is_authenticated %}
-        {# ====== BOTÕES POR PERMISSÃO (via context_processor) ====== #}
-        {% if pode_ver_operacao %}
-          <a class="btn btn-sm btn-light" href="{% url 'operacao:quadro' %}">Operação</a>
+        {% if user.is_authenticated %}
+          <a class="btn btn-light btn-sm" href="/operacao/">Operação</a>
+          <a class="btn btn-light btn-sm" href="/gestao/">Gestão</a>
+          <a class="btn btn-light btn-sm" href="/nibo/">Nibo</a>
+
+          {% if chat_enabled %}
+            <button id="chatToggleBtn" type="button" class="btn btn-warning btn-sm position-relative">
+              💬 Chat
+              <span id="chatUnreadBadge"
+                    class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger"
+                    style="{% if not chat_unread %}display:none;{% endif %}">
+                {{ chat_unread|default:0 }}
+              </span>
+            </button>
+          {% endif %}
+
+          <span class="text-white small ms-2">Olá, {{ user.username }}</span>
+
+          <form method="post" action="{% url 'logout' %}" class="m-0">
+            {% csrf_token %}
+            <button class="btn btn-outline-light btn-sm" type="submit">Sair</button>
+          </form>
+        {% else %}
+          <a class="btn btn-light btn-sm" href="{% url 'login' %}">Entrar</a>
         {% endif %}
+      </div>
+    </div>
+  </nav>
 
-        {% if pode_ver_gestao %}
-          <a class="btn btn-sm btn-light" href="{% url 'gestao:quadro' %}">Gestão</a>
-        {% endif %}
+  <main class="{% block container_class %}container-fluid px-3{% endblock %} py-3">
+    {% block content %}{% endblock %}
+  </main>
 
-        {% if pode_ver_nibo %}
-          <a class="btn btn-sm btn-light" href="{% url 'nibo_panel:painel' %}">Nibo</a>
-        {% endif %}
+  {% if user.is_authenticated and chat_enabled %}
+  <!-- CHAT FLUTUANTE -->
+  <div id="chatBox" class="card shadow"
+       style="position:fixed; right:22px; bottom:22px; width:360px; height:520px; display:none; z-index:9999; border-radius:12px; overflow:hidden;">
+    <div class="card-header d-flex align-items-center justify-content-between"
+         style="background:#2f7df6; color:#fff;">
+      <div class="fw-semibold">Chat interno</div>
+      <button id="chatCloseBtn" class="btn btn-sm btn-light">✕</button>
+    </div>
 
-        <span class="text-white-50 small ms-2">Olá, {{ user.username }}</span>
+    <!-- layout 2 colunas -->
+    <div class="d-flex" style="height:100%;">
+      <!-- CONTATOS -->
+      <div style="width:140px; border-right:1px solid #e9ecef; background:#fff; display:flex; flex-direction:column;">
+        <div class="p-2" style="border-bottom:1px solid #e9ecef;">
+          <input id="chatSearchUser" class="form-control form-control-sm" placeholder="Buscar...">
+        </div>
 
-        {# ====== LOGOUT POST (Django 5+) ====== #}
-        <form method="post" action="{% url 'logout' %}" class="d-inline ms-2">
-          {% csrf_token %}
-          <button class="btn btn-sm btn-outline-light" type="submit">Sair</button>
-        </form>
-      {% else %}
-        <a class="btn btn-sm btn-light" href="{% url 'login' %}">Entrar</a>
-      {% endif %}
+        <div id="chatContacts" class="p-1" style="overflow:auto; flex:1;">
+          <!-- render inicial server-side -->
+          {% for c in chat_contatos %}
+            <button class="chat-contact btn btn-light btn-sm w-100 text-start mb-1"
+                    data-user-id="{{ c.id }}"
+                    style="display:flex; align-items:center; justify-content:space-between; gap:6px;">
+              <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                {% if c.online %}🟢{% else %}⚪{% endif %} {{ c.username }}
+              </span>
+              {% if c.unread %}
+                <span class="badge bg-danger">{{ c.unread }}</span>
+              {% endif %}
+            </button>
+          {% empty %}
+            <div class="small text-secondary p-2">Sem contatos.</div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <!-- MENSAGENS -->
+      <div style="flex:1; display:flex; flex-direction:column; background:#f8f9fa;">
+        <div class="p-2" style="border-bottom:1px solid #e9ecef; background:#fff;">
+          <div class="d-flex gap-2">
+            <input id="chatSearchMsg" class="form-control form-control-sm" placeholder="Pesquisar no histórico...">
+            <button id="chatSearchBtn" class="btn btn-sm btn-outline-primary">OK</button>
+          </div>
+          <div class="small text-secondary mt-1" id="chatHint">Selecione um contato.</div>
+        </div>
+
+        <div id="chatMessages" class="p-2" style="overflow:auto; flex:1;"></div>
+
+        <div class="p-2" style="border-top:1px solid #e9ecef; background:#fff;">
+          <div class="d-flex gap-2">
+            <input id="chatInput" class="form-control form-control-sm" placeholder="Digite..." disabled>
+            <button id="chatSendBtn" class="btn btn-sm btn-primary" disabled>Enviar</button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
-</nav>
 
-<main class="container-fluid py-4">
-  {% block content %}{% endblock %}
-</main>
+  <script>
+    const CSRF_TOKEN = "{{ csrf_token }}";
 
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-{% block extra_js %}{% endblock %}
+    const API = {
+      ping: "{% url 'chat_interno:ping' %}",
+      contacts: "{% url 'chat_interno:contacts' %}",
+      messages: (userId) => `/chat/thread/${userId}/messages/`,
+      send: (userId) => `/chat/thread/${userId}/send/`,
+    };
+
+    const chatBox = document.getElementById("chatBox");
+    const chatToggleBtn = document.getElementById("chatToggleBtn");
+    const chatCloseBtn = document.getElementById("chatCloseBtn");
+
+    const chatContacts = document.getElementById("chatContacts");
+    const chatMessages = document.getElementById("chatMessages");
+    const chatInput = document.getElementById("chatInput");
+    const chatSendBtn = document.getElementById("chatSendBtn");
+
+    const chatUnreadBadge = document.getElementById("chatUnreadBadge");
+
+    const chatSearchUser = document.getElementById("chatSearchUser");
+    const chatSearchMsg = document.getElementById("chatSearchMsg");
+    const chatSearchBtn = document.getElementById("chatSearchBtn");
+    const chatHint = document.getElementById("chatHint");
+
+    let activeUserId = null;
+
+    function escapeHtml(s) {
+      return (s || "").replace(/[&<>"']/g, (m) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;"
+      }[m]));
+    }
+
+    function setUnread(total) {
+      const v = Number(total || 0);
+      if (!chatUnreadBadge) return;
+      if (v > 0) {
+        chatUnreadBadge.style.display = "inline-block";
+        chatUnreadBadge.textContent = v;
+      } else {
+        chatUnreadBadge.style.display = "none";
+      }
+    }
+
+    async function apiGet(url) {
+      const r = await fetch(url, { credentials: "same-origin" });
+      return await r.json();
+    }
+
+    async function apiPost(url, data) {
+      const r = await fetch(url, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRFToken": CSRF_TOKEN,
+        },
+        body: JSON.stringify(data || {})
+      });
+      return await r.json();
+    }
+
+    function renderContacts(list) {
+      chatContacts.innerHTML = "";
+      if (!list || !list.length) {
+        chatContacts.innerHTML = '<div class="small text-secondary p-2">Sem contatos.</div>';
+        return;
+      }
+
+      for (const c of list) {
+        const btn = document.createElement("button");
+        btn.className = "chat-contact btn btn-light btn-sm w-100 text-start mb-1";
+        btn.dataset.userId = c.id;
+        btn.style.display = "flex";
+        btn.style.alignItems = "center";
+        btn.style.justifyContent = "space-between";
+        btn.style.gap = "6px";
+
+        const left = document.createElement("span");
+        left.style.whiteSpace = "nowrap";
+        left.style.overflow = "hidden";
+        left.style.textOverflow = "ellipsis";
+        left.innerHTML = `${c.online ? "🟢" : "⚪"} ${escapeHtml(c.username)}`;
+
+        btn.appendChild(left);
+
+        if (c.unread && Number(c.unread) > 0) {
+          const badge = document.createElement("span");
+          badge.className = "badge bg-danger";
+          badge.textContent = c.unread;
+          btn.appendChild(badge);
+        }
+
+        btn.addEventListener("click", () => openThread(c.id, c.username));
+        chatContacts.appendChild(btn);
+      }
+    }
+
+    function renderMessages(list) {
+      chatMessages.innerHTML = "";
+      if (!list || !list.length) {
+        chatMessages.innerHTML = '<div class="small text-secondary">Sem mensagens.</div>';
+        return;
+      }
+
+      for (const m of list) {
+        const bubble = document.createElement("div");
+        const mine = (m.sender_id === {{ user.id }});
+
+        bubble.className = "p-2 mb-2 rounded";
+        bubble.style.maxWidth = "90%";
+        bubble.style.marginLeft = mine ? "auto" : "0";
+        bubble.style.background = mine ? "#dbeafe" : "#fff";
+        bubble.style.border = "1px solid #e9ecef";
+
+        bubble.innerHTML = `
+          <div class="small text-secondary mb-1">${mine ? "Você" : "Ele"} • ${escapeHtml(m.created_at || "")}</div>
+          <div>${escapeHtml(m.texto || "")}</div>
+        `;
+        chatMessages.appendChild(bubble);
+      }
+
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    async function refreshContacts() {
+      const data = await apiGet(API.contacts);
+      if (!data.ok) return;
+      setUnread(data.total_unread);
+      renderContacts(data.contacts);
+    }
+
+    async function openThread(userId, username) {
+      activeUserId = userId;
+      chatHint.textContent = `Conversando com: ${username}`;
+      chatInput.disabled = false;
+      chatSendBtn.disabled = false;
+
+      const q = (chatSearchMsg.value || "").trim();
+      const url = q ? `${API.messages(userId)}?q=${encodeURIComponent(q)}` : API.messages(userId);
+      const data = await apiGet(url);
+
+      if (!data.ok) return;
+
+      renderMessages(data.messages);
+      setUnread(data.total_unread);
+
+      // ao abrir conversa, atualiza contatos (tira unread daquele contato)
+      await refreshContacts();
+      chatInput.focus();
+    }
+
+    async function sendMessage() {
+      if (!activeUserId) return;
+      const texto = (chatInput.value || "").trim();
+      if (!texto) return;
+
+      chatInput.value = "";
+      const data = await apiPost(API.send(activeUserId), { texto });
+      if (!data.ok) return;
+
+      // recarrega mensagens (pra ficar consistente)
+      await openThread(activeUserId, chatHint.textContent.replace("Conversando com: ", ""));
+    }
+
+    async function pingOnline() {
+      try { await apiPost(API.ping, {}); } catch(e) {}
+    }
+
+    chatToggleBtn?.addEventListener("click", async () => {
+      chatBox.style.display = (chatBox.style.display === "none" ? "block" : "none");
+      if (chatBox.style.display === "block") {
+        await pingOnline();
+        await refreshContacts();
+      }
+    });
+
+    chatCloseBtn?.addEventListener("click", () => {
+      chatBox.style.display = "none";
+    });
+
+    chatSendBtn?.addEventListener("click", sendMessage);
+    chatInput?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") sendMessage();
+    });
+
+    chatSearchBtn?.addEventListener("click", async () => {
+      if (activeUserId) {
+        const username = chatHint.textContent.replace("Conversando com: ", "");
+        await openThread(activeUserId, username);
+      }
+    });
+
+    chatSearchUser?.addEventListener("input", () => {
+      const q = (chatSearchUser.value || "").toLowerCase();
+      const buttons = chatContacts.querySelectorAll(".chat-contact");
+      buttons.forEach(btn => {
+        const txt = (btn.textContent || "").toLowerCase();
+        btn.style.display = txt.includes(q) ? "" : "none";
+      });
+    });
+
+    // timers
+    setInterval(async () => {
+      // ping sempre (mantém online)
+      await pingOnline();
+
+      // se chat aberto, atualiza lista/unread
+      if (chatBox.style.display === "block") {
+        await refreshContacts();
+      }
+    }, 25000);
+  </script>
+  {% endif %}
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  {% block extra_js %}{% endblock %}
 </body>
 </html>

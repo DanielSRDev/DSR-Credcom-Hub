@@ -1,0 +1,28 @@
+<div class="d-flex flex-column" style="height:65vh;">
+  <div class="d-flex align-items-center justify-content-between mb-2">
+    <div class="fw-semibold">Conversando com: {{ other.username }}</div>
+    <input id="chatSearchMsgs" class="form-control form-control-sm" style="width:220px" placeholder="Buscar no chat...">
+  </div>
+
+  <div id="chatMsgs" class="border rounded p-2 bg-light" style="flex:1; overflow:auto;">
+    {% for m in msgs %}
+      <div class="mb-2 d-flex {% if m.sender_id == request.user.id %}justify-content-end{% else %}justify-content-start{% endif %}"
+           data-msg-id="{{ m.id }}">
+        <div class="p-2 rounded shadow-sm {% if m.sender_id == request.user.id %}bg-primary text-white{% else %}bg-white{% endif %}"
+             style="max-width:75%; white-space:pre-wrap;">
+          <div class="small opacity-75">{{ m.sender.username }} • {{ m.criado_em|date:"d/m/Y H:i" }}</div>
+          <div>{{ m.texto }}</div>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+
+  <form class="d-flex gap-2 mt-2" onsubmit="ChatUI.send(event, {{ conv.id }})">
+    {% csrf_token %}
+    <input id="chatInput" class="form-control" placeholder="Digite sua mensagem...">
+    <button class="btn btn-primary" type="submit">Enviar</button>
+  </form>
+
+  <input type="hidden" id="chatConvId" value="{{ conv.id }}">
+  <input type="hidden" id="chatOtherId" value="{{ other.id }}">
+</div>

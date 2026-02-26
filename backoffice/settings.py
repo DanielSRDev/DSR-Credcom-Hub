@@ -44,7 +44,8 @@ INSTALLED_APPS = [
     "widget_tweaks",
     "Gestao",
     "operacao",
-    "core"
+    "core",
+    "chat_interno",
 ]
 
 MIDDLEWARE = [
@@ -72,6 +73,7 @@ TEMPLATES = [
                 "django.contrib.messages.context_processors.messages",
                 # NOVO:
                 "core.context_processors.nav_permissoes",
+                "chat_interno.context_processors.chat_nav",
             ],
         },
     },

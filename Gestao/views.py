@@ -361,8 +361,16 @@ def anexo_upload(request, pk: int):
 
 
 @login_required
-def anexo_download(request, pk: int):
-    anexo = get_object_or_404(Anexo.objects.select_related("tarefa"), pk=pk)
+def anexo_download(request, anexo_id: int):
+    """
+    Baixa/abre o anexo.
+    IMPORTANTE:
+      - o nome do parâmetro precisa bater com o do urls.py: <int:anexo_id>
+      - no app Gestao o model é Anexo (não TarefaAnexo)
+    """
+    anexo = get_object_or_404(Anexo.objects.select_related("tarefa"), pk=anexo_id)
+
+    # Segurança: só quem pode ver a tarefa pode baixar o arquivo
     if not pode_ver_tarefa(request.user, anexo.tarefa):
         return HttpResponseForbidden("Sem permissão.")
 
@@ -370,7 +378,12 @@ def anexo_download(request, pk: int):
         raise Http404("Arquivo não encontrado.")
 
     try:
-        return FileResponse(anexo.arquivo.open("rb"), as_attachment=False, filename=anexo.nome_original or None)
+        # as_attachment=True força download; se quiser abrir no navegador, usa False
+        return FileResponse(
+            anexo.arquivo.open("rb"),
+            as_attachment=True,
+            filename=(anexo.nome_original or None),
+        )
     except FileNotFoundError:
         raise Http404("Arquivo não encontrado.")
 
