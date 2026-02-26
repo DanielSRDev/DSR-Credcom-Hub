@@ -17,8 +17,6 @@ urlpatterns = [
     # CHAT (com namespace certo)
     path("chat/", include(("chat_interno.urls", "chat_interno"), namespace="chat_interno")),
 
-    # auth
-    path("accounts/", include("django.contrib.auth.urls")),
 ] + static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
 
 if settings.DEBUG:

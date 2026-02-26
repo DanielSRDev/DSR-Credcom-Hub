@@ -17,7 +17,8 @@
     {% endfor %}
   </div>
 
-  <form class="d-flex gap-2 mt-2" onsubmit="ChatUI.send(event, {{ conv.id }})">
+  <!-- templates/chat_interno/conversation.html -->
+  <form class="d-flex gap-2 mt-2" onsubmit="ChatUI.send(event)">
     {% csrf_token %}
     <input id="chatInput" class="form-control" placeholder="Digite sua mensagem...">
     <button class="btn btn-primary" type="submit">Enviar</button>

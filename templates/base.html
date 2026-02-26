@@ -27,13 +27,13 @@
           <a class="btn btn-light btn-sm" href="/gestao/">Gestão</a>
           <a class="btn btn-light btn-sm" href="/nibo/">Nibo</a>
 
-          {% if chat_enabled %}
+          {% if chat_enabled|default:True %}
             <button id="chatToggleBtn" type="button" class="btn btn-warning btn-sm position-relative">
               💬 Chat
               <span id="chatUnreadBadge"
                     class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger"
-                    style="{% if not chat_unread %}display:none;{% endif %}">
-                {{ chat_unread|default:0 }}
+                    style="{% if not chat_unread_total|default:0 %}display:none;{% endif %}">
+                {{ chat_unread_total|default:0 }}
               </span>
             </button>
           {% endif %}
@@ -55,7 +55,7 @@
     {% block content %}{% endblock %}
   </main>
 
-  {% if user.is_authenticated and chat_enabled %}
+  {% if user.is_authenticated and chat_enabled|default:True %}
   <!-- CHAT FLUTUANTE -->
   <div id="chatBox" class="card shadow"
        style="position:fixed; right:22px; bottom:22px; width:360px; height:520px; display:none; z-index:9999; border-radius:12px; overflow:hidden;">
@@ -65,7 +65,6 @@
       <button id="chatCloseBtn" class="btn btn-sm btn-light">✕</button>
     </div>
 
-    <!-- layout 2 colunas -->
     <div class="d-flex" style="height:100%;">
       <!-- CONTATOS -->
       <div style="width:140px; border-right:1px solid #e9ecef; background:#fff; display:flex; flex-direction:column;">
@@ -75,7 +74,7 @@
 
         <div id="chatContacts" class="p-1" style="overflow:auto; flex:1;">
           <!-- render inicial server-side -->
-          {% for c in chat_contatos %}
+          {% for c in chat_contacts %}
             <button class="chat-contact btn btn-light btn-sm w-100 text-start mb-1"
                     data-user-id="{{ c.id }}"
                     style="display:flex; align-items:center; justify-content:space-between; gap:6px;">
@@ -96,8 +95,8 @@
       <div style="flex:1; display:flex; flex-direction:column; background:#f8f9fa;">
         <div class="p-2" style="border-bottom:1px solid #e9ecef; background:#fff;">
           <div class="d-flex gap-2">
-            <input id="chatSearchMsg" class="form-control form-control-sm" placeholder="Pesquisar no histórico...">
-            <button id="chatSearchBtn" class="btn btn-sm btn-outline-primary">OK</button>
+            <input id="chatSearchMsg" class="form-control form-control-sm" placeholder="Pesquisar no histórico..." disabled>
+            <button id="chatSearchBtn" class="btn btn-sm btn-outline-primary" disabled>OK</button>
           </div>
           <div class="small text-secondary mt-1" id="chatHint">Selecione um contato.</div>
         </div>
@@ -115,13 +114,20 @@
   </div>
 
   <script>
-    const CSRF_TOKEN = "{{ csrf_token }}";
+    // pega csrftoken do cookie (mais confiável)
+    function getCookie(name) {
+      const v = `; ${document.cookie}`;
+      const parts = v.split(`; ${name}=`);
+      if (parts.length === 2) return parts.pop().split(';').shift();
+      return "";
+    }
+    const CSRF_TOKEN = getCookie("csrftoken");
 
     const API = {
       ping: "{% url 'chat_interno:ping' %}",
       contacts: "{% url 'chat_interno:contacts' %}",
-      messages: (userId) => `/chat/thread/${userId}/messages/`,
-      send: (userId) => `/chat/thread/${userId}/send/`,
+      history: (userId) => `/chat/history/${userId}/`,
+      send: (userId) => `/chat/send/${userId}/`,
     };
 
     const chatBox = document.getElementById("chatBox");
@@ -141,6 +147,8 @@
     const chatHint = document.getElementById("chatHint");
 
     let activeUserId = null;
+    let activeUsername = "";
+    let pollThreadTimer = null;
 
     function escapeHtml(s) {
       return (s || "").replace(/[&<>"']/g, (m) => ({
@@ -164,15 +172,12 @@
       return await r.json();
     }
 
-    async function apiPost(url, data) {
+    async function apiPostForm(url, formData) {
       const r = await fetch(url, {
         method: "POST",
         credentials: "same-origin",
-        headers: {
-          "Content-Type": "application/json",
-          "X-CSRFToken": CSRF_TOKEN,
-        },
-        body: JSON.stringify(data || {})
+        headers: { "X-CSRFToken": CSRF_TOKEN },
+        body: formData
       });
       return await r.json();
     }
@@ -231,7 +236,7 @@
         bubble.style.border = "1px solid #e9ecef";
 
         bubble.innerHTML = `
-          <div class="small text-secondary mb-1">${mine ? "Você" : "Ele"} • ${escapeHtml(m.created_at || "")}</div>
+          <div class="small text-secondary mb-1">${mine ? "Você" : "Ele"} • ${escapeHtml(m.criado_em || "")}</div>
           <div>${escapeHtml(m.texto || "")}</div>
         `;
         chatMessages.appendChild(bubble);
@@ -240,31 +245,47 @@
       chatMessages.scrollTop = chatMessages.scrollHeight;
     }
 
+    function sumUnreadFromItems(items) {
+      let total = 0;
+      (items || []).forEach(i => total += Number(i.unread || 0));
+      return total;
+    }
+
     async function refreshContacts() {
       const data = await apiGet(API.contacts);
-      if (!data.ok) return;
-      setUnread(data.total_unread);
-      renderContacts(data.contacts);
+
+      // backend retorna { items: [...] }
+      if (!data || !Array.isArray(data.items)) return;
+
+      renderContacts(data.items);
+      setUnread(sumUnreadFromItems(data.items));
     }
 
     async function openThread(userId, username) {
       activeUserId = userId;
-      chatHint.textContent = `Conversando com: ${username}`;
+      activeUsername = username || "";
+      chatHint.textContent = `Conversando com: ${activeUsername}`;
+
       chatInput.disabled = false;
       chatSendBtn.disabled = false;
+      chatSearchMsg.disabled = false;
+      chatSearchBtn.disabled = false;
 
-      const q = (chatSearchMsg.value || "").trim();
-      const url = q ? `${API.messages(userId)}?q=${encodeURIComponent(q)}` : API.messages(userId);
-      const data = await apiGet(url);
+      const data = await apiGet(API.history(userId));
+      if (!data || !Array.isArray(data.items)) return;
 
-      if (!data.ok) return;
-
-      renderMessages(data.messages);
-      setUnread(data.total_unread);
-
-      // ao abrir conversa, atualiza contatos (tira unread daquele contato)
+      renderMessages(data.items);
       await refreshContacts();
       chatInput.focus();
+
+      // auto-refresh da conversa (sem F5)
+      if (pollThreadTimer) clearInterval(pollThreadTimer);
+      pollThreadTimer = setInterval(async () => {
+        if (!activeUserId) return;
+        const d = await apiGet(API.history(activeUserId));
+        if (d && Array.isArray(d.items)) renderMessages(d.items);
+        await refreshContacts();
+      }, 2000);
     }
 
     async function sendMessage() {
@@ -273,15 +294,26 @@
       if (!texto) return;
 
       chatInput.value = "";
-      const data = await apiPost(API.send(activeUserId), { texto });
-      if (!data.ok) return;
 
-      // recarrega mensagens (pra ficar consistente)
-      await openThread(activeUserId, chatHint.textContent.replace("Conversando com: ", ""));
+      const fd = new FormData();
+      fd.append("texto", texto);
+
+      const data = await apiPostForm(API.send(activeUserId), fd);
+      if (!data || !data.ok) return;
+
+      // recarrega histórico
+      const h = await apiGet(API.history(activeUserId));
+      if (h && Array.isArray(h.items)) renderMessages(h.items);
+
+      await refreshContacts();
+      chatInput.focus();
     }
 
     async function pingOnline() {
-      try { await apiPost(API.ping, {}); } catch(e) {}
+      try {
+        const fd = new FormData();
+        await apiPostForm(API.ping, fd);
+      } catch(e) {}
     }
 
     chatToggleBtn?.addEventListener("click", async () => {
@@ -302,9 +334,10 @@
     });
 
     chatSearchBtn?.addEventListener("click", async () => {
+      // teu backend atual não tem busca por q no history, então só recarrega
       if (activeUserId) {
-        const username = chatHint.textContent.replace("Conversando com: ", "");
-        await openThread(activeUserId, username);
+        const d = await apiGet(API.history(activeUserId));
+        if (d && Array.isArray(d.items)) renderMessages(d.items);
       }
     });
 
@@ -317,12 +350,8 @@
       });
     });
 
-    // timers
     setInterval(async () => {
-      // ping sempre (mantém online)
       await pingOnline();
-
-      // se chat aberto, atualiza lista/unread
       if (chatBox.style.display === "block") {
         await refreshContacts();
       }

@@ -1,15 +1,20 @@
+{% load static %}
+
 <div class="d-flex flex-column gap-2">
   <div class="d-flex gap-2">
     <input id="chatSearchUsers" class="form-control form-control-sm" placeholder="Pesquisar contato...">
   </div>
 
   <div id="chatUserList" class="list-group" style="max-height: 60vh; overflow:auto;">
-    {% for u in contatos %}
+    {% for u in chat_contacts %}
       <button type="button"
               class="list-group-item list-group-item-action"
               onclick="ChatUI.open({{ u.id }})">
-        <div class="fw-semibold">{{ u.username }}</div>
-        <div class="small text-secondary">Clique para abrir</div>
+        <div class="fw-semibold">{{ u.name|default:u.username }}</div>
+        <div class="small text-secondary">
+          {% if u.online %}🟢 Online{% else %}⚪ Offline{% endif %}
+          {% if u.unread %} • <b>{{ u.unread }}</b> nova(s){% endif %}
+        </div>
       </button>
     {% empty %}
       <div class="text-secondary small">Nenhum contato disponível para você.</div>
@@ -17,11 +22,23 @@
   </div>
 </div>
 
+<!-- 1) Carrega o JS do chat -->
+<script src="{% static 'chat_interno/chat.js' %}"></script>
+
+<!-- 2) Inicia o chat + busca -->
 <script>
-  (function(){
+  document.addEventListener("DOMContentLoaded", () => {
+    // inicia o chat (polling + ping + carregar contatos)
+    if (window.ChatUI && typeof window.ChatUI.start === "function") {
+      window.ChatUI.start();
+    } else {
+      console.error("ChatUI não carregou. Verifique o caminho static 'chat_interno/chat.js'");
+    }
+
+    // filtro de busca
     const input = document.getElementById("chatSearchUsers");
     const list = document.getElementById("chatUserList");
-    if(!input || !list) return;
+    if (!input || !list) return;
 
     input.addEventListener("input", () => {
       const q = input.value.toLowerCase().trim();
@@ -30,5 +47,5 @@
         item.style.display = txt.includes(q) ? "" : "none";
       });
     });
-  })();
+  });
 </script>
