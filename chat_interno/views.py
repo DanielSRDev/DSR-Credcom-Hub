@@ -150,23 +150,24 @@ def export_history(request):
     if not can_export_admin(request.user):
         return JsonResponse({"error": "Sem permissão para exportar."}, status=403)
 
-    # admin passa ids: ?u1=ID&u2=ID
-    try:
-        u1 = int(request.GET.get("u1", "0"))
-        u2 = int(request.GET.get("u2", "0"))
-    except ValueError:
-        return JsonResponse({"error": "Parâmetros inválidos."}, status=400)
-
-    if not u1 or not u2:
+    # admin passa ids OU usernames: ?u1=ID|username&u2=ID|username
+    u1_raw = (request.GET.get("u1") or "").strip()
+    u2_raw = (request.GET.get("u2") or "").strip()
+    if not u1_raw or not u2_raw:
         return JsonResponse({"error": "Informe u1 e u2."}, status=400)
 
-    user1 = get_object_or_404(User, id=u1)
-    user2 = get_object_or_404(User, id=u2)
+    def get_user(val: str):
+        if val.isdigit():
+            return get_object_or_404(User, id=int(val))
+        return get_object_or_404(User, username__iexact=val)
+
+    user1 = get_user(u1_raw)
+    user2 = get_user(u2_raw)
 
     msgs, _ = list_messages_between(user1, user2)
 
     resp = HttpResponse(content_type="text/csv; charset=utf-8")
-    resp["Content-Disposition"] = f'attachment; filename="chat_{u1}_{u2}.csv"'
+    resp["Content-Disposition"] = f'attachment; filename="chat_{user1.id}_{user2.id}.csv"'
 
     w = csv.writer(resp, delimiter=";")
     w.writerow(["criado_em", "sender", "texto", "imagem_url"])

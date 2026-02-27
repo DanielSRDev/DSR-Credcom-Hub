@@ -86,7 +86,7 @@
 
       <!-- coluna direita: conversa -->
       <div class="d-flex flex-column" style="min-width:0;">
-        <div class="p-2 border-bottom" style="background:#fff;">
+        <div id="chatConvHead" class="p-2 border-bottom chat-conv-head" style="background:#fff;">
           <div class="d-flex gap-2 align-items-center">
             <input id="chatSearchMsg" class="form-control form-control-sm" placeholder="Pesquisar no histórico..." disabled>
             <button id="chatSearchBtn" class="btn btn-sm btn-outline-primary" disabled>OK</button>
@@ -99,13 +99,17 @@
               ⬇
             </button>
           </div>
-          <div class="small text-secondary mt-1" id="chatHint">Selecione um contato.</div>
+          <div class="d-flex align-items-center justify-content-between mt-1">
+            <div class="small text-secondary" id="chatHint">Selecione um contato.</div>
+            <div id="chatSelectedBadge" class="chat-selected-badge d-none"></div>
+          </div>
         </div>
 
         <div id="chatMsgs" class="p-3" style="overflow:auto; flex:1; background:#f8f9fa;"></div>
 
         <div class="p-2 border-top chat-input-fixed" style="background:#fff;">
           <input id="chatOtherId" type="hidden" value="">
+          <input id="chatMeId" type="hidden" value="{{ request.user.id }}">
 
           <div class="d-flex gap-2">
             <button id="chatEmojiBtn" class="btn btn-sm btn-light" type="button" disabled title="Emoji">😊</button>

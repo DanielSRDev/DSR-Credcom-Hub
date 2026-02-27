@@ -91,7 +91,9 @@ window.ChatUI = (() => {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "list-group-item list-group-item-action";
-      btn.onclick = () => open(u.id);
+      btn.dataset.userId = u.id;
+      const nm = (u.nome || u.username);
+      btn.onclick = () => open(u.id, nm);
 
       btn.innerHTML = `
         <div class="fw-semibold">${escapeHtml(u.nome || u.username)}</div>
@@ -100,6 +102,7 @@ window.ChatUI = (() => {
           ${u.unread ? ` • <b>${u.unread}</b> nova(s)` : ""}
         </div>
       `;
+      if (Number(u.id) === Number(currentOtherId)) btn.classList.add("active");
       list.appendChild(btn);
     });
   }
@@ -116,8 +119,19 @@ window.ChatUI = (() => {
       exportBtn.style.display = on && canExport ? "" : "none";
     }
   }
+  function setActiveContact(otherId){
+    const list = document.getElementById("chatUserList");
+    if (!list) return;
+    [...list.querySelectorAll(".list-group-item")].forEach((btn) => {
+      const id = Number(btn.dataset.userId || 0);
+      if (id && id === Number(otherId)) btn.classList.add("active");
+      else btn.classList.remove("active");
+    });
+  }
 
-  async function open(otherId) {
+
+
+  async function open(otherId, otherName=null) {
     currentOtherId = otherId;
 
     const otherHidden = document.getElementById("chatOtherId");
@@ -126,7 +140,15 @@ window.ChatUI = (() => {
     enableConversationUI(true);
 
     const hint = document.getElementById("chatHint");
-    if (hint) hint.textContent = "Conversa aberta.";
+    if (hint) hint.textContent = otherName ? `Conversa com: ${otherName}` : "Conversa aberta.";
+    const head = document.getElementById("chatConvHead");
+    if (head) head.classList.add("active");
+    const badge = document.getElementById("chatSelectedBadge");
+    if (badge) {
+      if (otherName) { badge.textContent = otherName; badge.classList.remove("d-none"); }
+      else { badge.classList.add("d-none"); }
+    }
+    setActiveContact(otherId);
 
     await doPing();
     await markRead(otherId);
@@ -157,7 +179,7 @@ window.ChatUI = (() => {
 
       bubble.innerHTML = `
         <div class="meta">${m.is_me ? "Você" : "Ele"} • ${formatDate(m.criado_em)}</div>
-        ${m.texto ? `<div>${escapeHtml(m.texto)}</div>` : ""}
+        ${m.texto ? `<div class="body">${escapeHtml(m.texto)}</div>` : ""}
       `;
 
       if (m.imagem_url) {
@@ -224,11 +246,33 @@ window.ChatUI = (() => {
     const emoji = document.getElementById("chatEmojiBtn");
     const imgBtn = document.getElementById("chatImgBtn");
     const imgIn = document.getElementById("chatImg");
+    const exportBtn = document.getElementById("chatExportBtn");
 
     if (sendBtn) sendBtn.addEventListener("click", (e) => {
       e.preventDefault();
       send();
     });
+
+    if (exportBtn) exportBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      // Se for admin/staff/coordenacao, pode exportar qualquer par via prompt.
+      // Caso contrário, exporta a conversa atual (eu x selecionado).
+      const meId = document.getElementById("chatMeId")?.value;
+      if (!meId) return;
+      let u1 = meId;
+      let u2 = currentOtherId;
+      if (!u2) return;
+      if (canExport) {
+        const ask = prompt("Exportar histórico.\n\nDigite dois usuários (ID ou username) separados por vírgula, ou deixe vazio para exportar a conversa atual.\nEx: hudson,gabriel");
+        if (ask && ask.includes(",")) {
+          const parts = ask.split(",").map(s => s.trim()).filter(Boolean);
+          if (parts.length >= 2) { u1 = parts[0]; u2 = parts[1]; }
+        }
+      }
+      const url = `/chat/export/?u1=${encodeURIComponent(u1)}&u2=${encodeURIComponent(u2)}`;
+      window.open(url, "_blank");
+    });
+
 
     if (input) {
       input.addEventListener("keydown", (e) => {
@@ -242,7 +286,7 @@ window.ChatUI = (() => {
     if (emoji) {
       emoji.addEventListener("click", () => {
         if (!input) return;
-        const pick = prompt("Digite um emoji (ex: 😀😎🔥✅):", "😀");
+        const pick = prompt("Digite um emoji (ex: 😀😎🔥✅😃😄😁😆😅🤣😂🙂🙃😉😊😇🥰😍🤩😘😗☺️😚😙😋😛😜🤪😝🤑🤗🤭🤫🤔🤐🤨😐😑😶😶😏😒🙄😬😮‍💨🤥🫨🙂‍↔️🙂‍↕️😌😔😪🤤😴☹️😮😯😲😳🥺😦😧😨😰😥😢😭😱😖😣😞😓😩😫🥱😤😡😠🤬😈👿💀☠️💩🤡👹👺👻👽👾🤖😺😸😹😻😼😽🙀😿😾🙈🙉🙊💋💯💢💥💫💦💨🕳️💤👋🤚🖐️✋🖖👌🤏✌️🤞🤟🤘🤙👈👉👆🖕👇☝️✍️💅🤳💪🦾🦿🦵🦶👂🦻👃🧠🦷🦴👀👁️👅👄👶🧒👦👧🧑👱👨🧔👨‍🦰👨‍🦱👨‍🦳👨‍🦲👩👩‍🦰🧑‍🦰👩‍🦱🧑‍🦱👩‍🦳🧑‍🦳👩‍🦲🧑‍🦲👱‍♀️👱‍♂️🧓👴👵🙍🙍‍♂️🙍‍♀️🙎🙎‍♂️🙎‍♀️🙅🙅‍♂️🙅‍♀️🙆🙆‍♂️🙆‍♀️💁💁‍♂️💁‍♀️🙋🙋‍♂️🙋‍♀️🧏🧏‍♂️🧏‍♀️🙇🙇‍♂️🙇‍♀️🤦🤦‍♂️🤦‍♀️🤷🤷‍♂️🤷‍♀️🫅🤴👸👳👲🧕🤵👰🤰🤱👩‍🍼👨‍🍼🧑‍🍼💃🕺🛀🛌🧑‍🤝‍🧑👭👫👬💏👩‍❤️‍💋‍👨👨‍❤️‍💋‍👨👩‍❤️‍💋‍👩💑👩‍❤️‍👨👨‍❤️‍👨👩‍❤️‍👩💌💘💝💖💗💓💞💕💟❣️💔❤️‍🔥❤️‍🩹❤️):", "😀");
         if (pick) input.value = (input.value || "") + pick;
         input.focus();
       });
