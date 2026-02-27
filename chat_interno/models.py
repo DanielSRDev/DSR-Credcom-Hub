@@ -1,6 +1,5 @@
 from django.conf import settings
 from django.db import models
-from django.db.models import Q
 
 User = settings.AUTH_USER_MODEL
 
@@ -29,7 +28,10 @@ class Conversation(models.Model):
 class Message(models.Model):
     conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name="messages")
     sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name="sent_messages")
-    texto = models.TextField()
+
+    texto = models.TextField(blank=True, default="")
+    imagem = models.ImageField(upload_to="chat_interno/imagens/", null=True, blank=True)
+
     criado_em = models.DateTimeField(auto_now_add=True)
     lido_em = models.DateTimeField(null=True, blank=True)
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse, HttpResponse
 from django.shortcuts import get_object_or_404
@@ -21,10 +22,18 @@ from .services import (
 User = get_user_model()
 
 
+def can_export_admin(user) -> bool:
+    if not user or not user.is_authenticated:
+        return False
+    if user.is_superuser or user.is_staff:
+        return True
+    # Coordenação
+    return user.groups.filter(name="OPERACAO_CORDENACAO").exists()
+
+
 @login_required
 @require_GET
 def index(request):
-    # Só pra não quebrar reverse('chat_interno:index') caso exista em algum template
     return HttpResponse("ok")
 
 
@@ -54,7 +63,7 @@ def contacts(request):
             }
         )
 
-    return JsonResponse({"items": items})
+    return JsonResponse({"items": items, "can_export": can_export_admin(user)})
 
 
 @login_required
@@ -69,28 +78,25 @@ def history(request, user_id: int):
     me = request.user
     other = get_object_or_404(User, id=user_id)
 
-    # deixa abrir se "eu posso falar com ele" OU "ele pode falar comigo"
     if not (can_send_to(me, other) or can_send_to(other, me)):
         return JsonResponse({"error": "Sem permissão."}, status=403)
 
-    msgs, conv = list_messages_between(me, other, limit=120)
-    mark_read_conversation(me, other)
+    msgs, conv = list_messages_between(me, other)
 
-    return JsonResponse(
-        {
-            "conversation_id": conv.id,
-            "items": [
-                {
-                    "id": m.id,
-                    "sender_id": m.sender_id,
-                    "texto": m.texto,
-                    "criado_em": m.criado_em.isoformat(),
-                    "is_me": m.sender_id == me.id,
-                }
-                for m in msgs
-            ],
-        }
-    )
+    items = []
+    for m in msgs:
+        items.append(
+            {
+                "id": m.id,
+                "sender_id": m.sender_id,
+                "texto": m.texto or "",
+                "imagem_url": (m.imagem.url if getattr(m, "imagem", None) else None),
+                "criado_em": m.criado_em.isoformat(),
+                "is_me": m.sender_id == me.id,
+            }
+        )
+
+    return JsonResponse({"items": items})
 
 
 @login_required
@@ -103,10 +109,12 @@ def send_message(request, user_id: int):
         return JsonResponse({"error": "Sem permissão para enviar."}, status=403)
 
     texto = (request.POST.get("texto") or "").strip()
-    if not texto:
+    imagem = request.FILES.get("imagem")
+
+    if not texto and not imagem:
         return JsonResponse({"error": "Mensagem vazia."}, status=400)
 
-    msg = send_text(me, other, texto)
+    msg = send_text(me, other, texto, imagem=imagem)
 
     return JsonResponse(
         {
@@ -114,7 +122,8 @@ def send_message(request, user_id: int):
             "msg": {
                 "id": msg.id,
                 "sender_id": msg.sender_id,
-                "texto": msg.texto,
+                "texto": msg.texto or "",
+                "imagem_url": (msg.imagem.url if msg.imagem else None),
                 "criado_em": msg.criado_em.isoformat(),
                 "is_me": True,
             },
@@ -133,3 +142,41 @@ def mark_read(request, user_id: int):
 
     updated = mark_read_conversation(me, other)
     return JsonResponse({"ok": True, "updated": updated})
+
+
+@login_required
+@require_GET
+def export_history(request):
+    if not can_export_admin(request.user):
+        return JsonResponse({"error": "Sem permissão para exportar."}, status=403)
+
+    # admin passa ids: ?u1=ID&u2=ID
+    try:
+        u1 = int(request.GET.get("u1", "0"))
+        u2 = int(request.GET.get("u2", "0"))
+    except ValueError:
+        return JsonResponse({"error": "Parâmetros inválidos."}, status=400)
+
+    if not u1 or not u2:
+        return JsonResponse({"error": "Informe u1 e u2."}, status=400)
+
+    user1 = get_object_or_404(User, id=u1)
+    user2 = get_object_or_404(User, id=u2)
+
+    msgs, _ = list_messages_between(user1, user2)
+
+    resp = HttpResponse(content_type="text/csv; charset=utf-8")
+    resp["Content-Disposition"] = f'attachment; filename="chat_{u1}_{u2}.csv"'
+
+    w = csv.writer(resp, delimiter=";")
+    w.writerow(["criado_em", "sender", "texto", "imagem_url"])
+
+    for m in msgs:
+        w.writerow([
+            m.criado_em.isoformat(),
+            m.sender.get_username(),
+            (m.texto or "").replace("\n", " "),
+            (m.imagem.url if getattr(m, "imagem", None) else ""),
+        ])
+
+    return resp

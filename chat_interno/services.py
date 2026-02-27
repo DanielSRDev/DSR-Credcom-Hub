@@ -1,194 +1,156 @@
 from __future__ import annotations
 
-from typing import Dict, List
-
-from django.contrib.auth import get_user_model
-from django.core.cache import cache
-from django.db.models import Count, Q
+from datetime import timedelta
 from django.utils import timezone
+from django.contrib.auth import get_user_model
+from django.db.models import Q, Count
 
-from .models import ChatVinculoOperador, Conversation, Message
-
+from .models import Conversation, Message, ChatVinculoOperador
 
 User = get_user_model()
 
-# ====== Regras de permissão (por Grupo) ======
-GRP_OPERACAO = "OPERACAO"
-GRP_SUPERVISOR = "OPERACAO_SUPERVISOR"
-GRP_CORDENACAO = "OPERACAO_CORDENACAO"
+ONLINE_TTL_SECONDS = 60
 
-ONLINE_TTL_SECONDS = 90  # ping a cada ~20-30s, TTL curto pra "online" ser real
+# =========================
+# REGRAS DE CONTATO / ENVIO
+# =========================
 
+def _in_group(user, name: str) -> bool:
+    return user.groups.filter(name=name).exists()
 
-def _has_group(user, group_name: str) -> bool:
-    try:
-        return user.groups.filter(name=group_name).exists()
-    except Exception:
-        return False
-
-
-def get_role(user) -> str:
-    """
-    Precedência: Coordenação > Supervisor > Operação > Other
-    """
-    if getattr(user, "is_superuser", False):
-        return "SUPERUSER"
-    if _has_group(user, GRP_CORDENACAO):
-        return "CORDENACAO"
-    if _has_group(user, GRP_SUPERVISOR):
-        return "SUPERVISOR"
-    if _has_group(user, GRP_OPERACAO):
-        return "OPERACAO"
-    return "OTHER"
-
-
-# ====== Online ======
-
-def ping_user(user) -> None:
-    if not user or not getattr(user, "is_authenticated", False):
-        return
-    cache.set(f"chat_online:{user.id}", timezone.now().timestamp(), timeout=ONLINE_TTL_SECONDS)
-
-
-def is_online(user_id: int) -> bool:
-    if not user_id:
-        return False
-    return cache.get(f"chat_online:{user_id}") is not None
-
-
-# ====== Contatos permitidos (SUA REGRA) ======
 
 def allowed_contacts(user):
     """
-    Regra solicitada:
-
-    - OPERACAO:
-        manda/recebe de OPERACAO_SUPERVISOR e OPERACAO_CORDENACAO
-    - OPERACAO_SUPERVISOR:
-        manda/recebe da sua equipe (vínculo),
-        de OPERACAO_CORDENACAO e de outros supervisores
-    - OPERACAO_CORDENACAO:
-        fala com todo mundo e vê todo mundo
+    Regras:
+    - Coordenação: fala com todos
+    - Supervisor: fala com equipe + supervisores + coordenação
+    - Operação: fala só com supervisor + coordenação
     """
-    if not user or not getattr(user, "is_authenticated", False):
-        return User.objects.none()
-
     qs = User.objects.filter(is_active=True).exclude(id=user.id)
-    role = get_role(user)
 
-    if role in ("SUPERUSER", "CORDENACAO"):
+    is_coord = _in_group(user, "OPERACAO_CORDENACAO")
+    is_sup = _in_group(user, "OPERACAO_SUPERVISOR")
+    is_oper = _in_group(user, "OPERACAO")
+
+    if is_coord:
         return qs
 
-    if role == "OPERACAO":
-        return qs.filter(groups__name__in=[GRP_CORDENACAO, GRP_SUPERVISOR]).distinct()
+    if is_sup:
+        sup_ids = User.objects.filter(groups__name="OPERACAO_SUPERVISOR").values_list("id", flat=True)
+        coord_ids = User.objects.filter(groups__name="OPERACAO_CORDENACAO").values_list("id", flat=True)
+        equipe_ids = ChatVinculoOperador.objects.filter(supervisor=user).values_list("operador_id", flat=True)
 
-    if role == "SUPERVISOR":
-        equipe_ids = list(
-            ChatVinculoOperador.objects.filter(supervisor=user).values_list("operador_id", flat=True)
-        )
         return qs.filter(
-            Q(groups__name=GRP_CORDENACAO) |
-            Q(groups__name=GRP_SUPERVISOR) |
-            Q(id__in=equipe_ids)
+            Q(id__in=sup_ids) | Q(id__in=coord_ids) | Q(id__in=equipe_ids)
         ).distinct()
 
-    return User.objects.none()
+    if is_oper:
+        vinc = ChatVinculoOperador.objects.filter(operador=user).first()
+        coord_ids = User.objects.filter(groups__name="OPERACAO_CORDENACAO").values_list("id", flat=True)
+
+        if not vinc:
+            return qs.filter(id__in=coord_ids)
+
+        return qs.filter(Q(id=vinc.supervisor_id) | Q(id__in=coord_ids)).distinct()
+
+    return qs.none()
 
 
-def can_send_to(sender, receiver) -> bool:
-    if not sender or not getattr(sender, "is_authenticated", False):
+def can_send_to(me, other) -> bool:
+    return allowed_contacts(me).filter(id=other.id).exists()
+
+
+# ==========
+# PRESENÇA
+# ==========
+
+_last_ping = {}  # user_id -> datetime
+
+
+def ping_user(user):
+    _last_ping[user.id] = timezone.now()
+
+
+def is_online(user_id: int) -> bool:
+    ts = _last_ping.get(user_id)
+    if not ts:
         return False
-    if not receiver or not getattr(receiver, "is_active", False):
-        return False
-    if sender.id == receiver.id:
-        return False
-
-    s_role = get_role(sender)
-    if s_role in ("SUPERUSER", "CORDENACAO"):
-        return True
-
-    return allowed_contacts(sender).filter(id=receiver.id).exists()
+    return timezone.now() - ts <= timedelta(seconds=ONLINE_TTL_SECONDS)
 
 
-# ====== Conversas e mensagens ======
+# ==========
+# CONVERSA
+# ==========
 
-def get_or_create_conversation(user_a, user_b) -> Conversation:
-    if user_a.id == user_b.id:
-        raise ValueError("Não existe conversa com você mesmo.")
-
-    a, b = (user_a, user_b) if user_a.id < user_b.id else (user_b, user_a)
-
-    conv = (
-        Conversation.objects.filter(Q(user1=a, user2=b) | Q(user1=b, user2=a))
-        .select_related("user1", "user2")
-        .first()
-    )
-    if conv:
-        return conv
-
-    return Conversation.objects.create(user1=a, user2=b)
+def _get_or_create_conversation(u1, u2):
+    a, b = (u1, u2) if u1.id < u2.id else (u2, u1)
+    conv, _ = Conversation.objects.get_or_create(user1=a, user2=b)
+    return conv
 
 
-def send_message(sender, receiver, texto: str) -> Message:
-    texto = (texto or "").strip()
-    if not texto:
-        raise ValueError("Mensagem vazia.")
-    if not can_send_to(sender, receiver):
-        raise PermissionError("Sem permissão para enviar para este usuário.")
-
-    conv = get_or_create_conversation(sender, receiver)
-    return Message.objects.create(conversation=conv, sender=sender, texto=texto)
+def list_messages_between(me, other):
+    conv = _get_or_create_conversation(me, other)
+    msgs = conv.messages.select_related("sender").all()
+    return msgs, conv
 
 
-def mark_read(user, other) -> int:
-    conv = get_or_create_conversation(user, other)
-    now = timezone.now()
-    qs = Message.objects.filter(conversation=conv, sender=other, lido_em__isnull=True)
-    return qs.update(lido_em=now)
+# ==========
+# UNREAD (CERTINHO)
+# ==========
 
+def unread_by_contact(user):
+    """
+    Retorna {other_user_id: qtd_nao_lidas}
+    IMPORTANTE: só conta mensagens recebidas (sender != user).
+    """
+    conv_qs = Conversation.objects.filter(Q(user1=user) | Q(user2=user))
 
-# ====== Não lidas ======
+    qs = Message.objects.filter(
+        conversation__in=conv_qs,
+        lido_em__isnull=True,
+    ).exclude(sender=user)  # <-- ESSENCIAL: não conta as que eu enviei
+
+    # Como é 1:1, o "sender_id" é o outro usuário (quem me enviou)
+    data = qs.values("sender_id").annotate(c=Count("id"))
+    return {row["sender_id"]: row["c"] for row in data}
+
 
 def unread_count(user) -> int:
-    if not user or not getattr(user, "is_authenticated", False):
-        return 0
+    """
+    Total de não-lidas para badge da navbar.
+    Só conta o que o usuário RECEBEU e ainda não leu.
+    """
+    conv_qs = Conversation.objects.filter(Q(user1=user) | Q(user2=user))
+
     return Message.objects.filter(
-        Q(conversation__user1=user) | Q(conversation__user2=user),
+        conversation__in=conv_qs,
         lido_em__isnull=True,
-    ).exclude(sender=user).count()
+    ).exclude(sender=user).count()  # <-- ESSENCIAL
 
 
-def unread_by_contact(user) -> Dict[int, int]:
-    if not user or not getattr(user, "is_authenticated", False):
-        return {}
+def mark_read_conversation(me, other) -> int:
+    """
+    Marca como lidas só mensagens do OUTRO pra MIM.
+    """
+    conv = _get_or_create_conversation(me, other)
 
-    rows = (
-        Message.objects.filter(
-            Q(conversation__user1=user) | Q(conversation__user2=user),
-            lido_em__isnull=True,
-        )
-        .exclude(sender=user)
-        .values("sender_id")
-        .annotate(c=Count("id"))
+    qs = conv.messages.filter(
+        lido_em__isnull=True
+    ).exclude(sender=me)  # <-- só o que eu RECEBI
+
+    return qs.update(lido_em=timezone.now())
+
+
+# ==========
+# ENVIO
+# ==========
+
+def send_text(me, other, texto: str, imagem=None):
+    conv = _get_or_create_conversation(me, other)
+    msg = Message.objects.create(
+        conversation=conv,
+        sender=me,
+        texto=texto or "",
+        imagem=imagem if imagem else None,
     )
-    return {r["sender_id"]: int(r["c"]) for r in rows}
-
-
-# ====== Compat (nomes que suas views.py já usam) ======
-
-def list_messages_between(user, other, limit: int = 80):
-    conv = get_or_create_conversation(user, other)
-    msgs = (
-        Message.objects.filter(conversation=conv)
-        .select_related("sender")
-        .order_by("criado_em")[: max(1, min(limit, 500))]
-    )
-    return list(msgs), conv
-
-
-def send_text(sender, receiver, texto: str) -> Message:
-    return send_message(sender, receiver, texto)
-
-
-def mark_read_conversation(user, other) -> int:
-    return mark_read(user, other)
+    return msg

@@ -22,20 +22,12 @@
   </div>
 </div>
 
-<!-- 1) Carrega o JS do chat -->
+<!-- JS do chat (AGORA VAI EXISTIR NO STATIC) -->
 <script src="{% static 'chat_interno/chat.js' %}"></script>
 
-<!-- 2) Inicia o chat + busca -->
 <script>
   document.addEventListener("DOMContentLoaded", () => {
-    // inicia o chat (polling + ping + carregar contatos)
-    if (window.ChatUI && typeof window.ChatUI.start === "function") {
-      window.ChatUI.start();
-    } else {
-      console.error("ChatUI não carregou. Verifique o caminho static 'chat_interno/chat.js'");
-    }
-
-    // filtro de busca
+    // filtro local (só UI)
     const input = document.getElementById("chatSearchUsers");
     const list = document.getElementById("chatUserList");
     if (!input || !list) return;
