@@ -1,4 +1,5 @@
 {% load static %}
+{% load group_tags %}
 <!doctype html>
 <html lang="pt-br">
 <head>
@@ -23,9 +24,18 @@
       <div class="d-flex align-items-center gap-2 ms-auto">
 
         {% if user.is_authenticated %}
+
+          {% if user|has_any_group:"OPERACAO,OPERACAO_CORDENACAO,OPERACAO_SUPERVISOR" %}
           <a class="btn btn-light btn-sm" href="/operacao/">Operação</a>
+          {% endif %}
+
+          {% if user|has_any_group:"GESTAO,GESTAO_GESTOR,GESTAO_GESTORA,GESTAO_USUARIO" %}
           <a class="btn btn-light btn-sm" href="/gestao/">Gestão</a>
+          {% endif %}
+
+          {% if user|has_any_group:"NIBO" %}
           <a class="btn btn-light btn-sm" href="/nibo/">Nibo</a>
+          {% endif %}
 
           {% if chat_enabled|default:True %}
             <button id="chatToggleBtn" type="button" class="btn btn-warning btn-sm position-relative">
