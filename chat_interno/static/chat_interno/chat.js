@@ -6,6 +6,11 @@ window.ChatUI = (() => {
 
   let bound = false;      // ✅ garante 1 bind só
   let sending = false;    // ✅ trava duplo envio
+  let historyLoading = false;
+
+  // ✅ controle de mudança
+  let lastRenderedLastId = 0;
+  let lastMarkAt = 0;
 
   function getCookie(name) {
     const v = `; ${document.cookie}`;
@@ -119,7 +124,8 @@ window.ChatUI = (() => {
       exportBtn.style.display = on && canExport ? "" : "none";
     }
   }
-  function setActiveContact(otherId){
+
+  function setActiveContact(otherId) {
     const list = document.getElementById("chatUserList");
     if (!list) return;
     [...list.querySelectorAll(".list-group-item")].forEach((btn) => {
@@ -129,10 +135,11 @@ window.ChatUI = (() => {
     });
   }
 
-
-
-  async function open(otherId, otherName=null) {
+  async function open(otherId, otherName = null) {
     currentOtherId = otherId;
+
+    // ✅ reset do controle quando troca de conversa
+    lastRenderedLastId = 0;
 
     const otherHidden = document.getElementById("chatOtherId");
     if (otherHidden) otherHidden.value = otherId;
@@ -148,60 +155,87 @@ window.ChatUI = (() => {
       if (otherName) { badge.textContent = otherName; badge.classList.remove("d-none"); }
       else { badge.classList.add("d-none"); }
     }
+
     setActiveContact(otherId);
 
     await doPing();
-    await markRead(otherId);
-
     await loadContacts();
     await loadHistory(true);
 
+    // ✅ polling mais leve (4s). e sem empilhar por causa do lock.
     if (pollTimer) clearInterval(pollTimer);
-    pollTimer = setInterval(() => loadHistory(false), 2000);
+    pollTimer = setInterval(() => loadHistory(false), 4000);
   }
 
   async function loadHistory(forceScroll) {
     if (!currentOtherId) return;
 
-    const data = await apiGet(`/chat/history/${currentOtherId}/`);
-    if (data.error) return;
+    if (historyLoading) return; // 🔒 trava concorrência
+    historyLoading = true;
 
-    const box = document.getElementById("chatMsgs");
-    if (!box) return;
+    try {
+      const data = await apiGet(`/chat/history/${currentOtherId}/`);
+      if (data?.error) return;
 
-    box.innerHTML = "";
-    (data.items || []).forEach((m) => {
-      const wrap = document.createElement("div");
-      wrap.className = `mb-2 d-flex ${m.is_me ? "justify-content-end" : "justify-content-start"}`;
+      const box = document.getElementById("chatMsgs");
+      if (!box) return;
 
-      const bubble = document.createElement("div");
-      bubble.className = `chat-bubble ${m.is_me ? "mine" : "theirs"}`;
+      const items = data.items || [];
+      const lastId = items.length ? Number(items[items.length - 1].id) : 0;
 
-      bubble.innerHTML = `
-        <div class="meta">${m.is_me ? "Você" : "Ele"} • ${formatDate(m.criado_em)}</div>
-        ${m.texto ? `<div class="body">${escapeHtml(m.texto)}</div>` : ""}
-      `;
-
-      if (m.imagem_url) {
-        const img = document.createElement("img");
-        img.className = "chat-img";
-        img.src = m.imagem_url;
-        img.alt = "imagem";
-        bubble.appendChild(img);
+      // ✅ se não mudou e não é forçar scroll, não faz nada
+      if (lastId && lastId === lastRenderedLastId && !forceScroll) {
+        return;
       }
 
-      wrap.appendChild(bubble);
-      box.appendChild(wrap);
-    });
+      // render
+      box.innerHTML = "";
+      items.forEach((m) => {
+        const wrap = document.createElement("div");
+        wrap.className = `mb-2 d-flex ${m.is_me ? "justify-content-end" : "justify-content-start"}`;
 
-    if (forceScroll) box.scrollTop = box.scrollHeight;
+        const bubble = document.createElement("div");
+        bubble.className = `chat-bubble ${m.is_me ? "mine" : "theirs"}`;
 
-    await markRead(currentOtherId);
-    await loadContacts();
+        bubble.innerHTML = `
+          <div class="meta">${m.is_me ? "Você" : "Ele"} • ${formatDate(m.criado_em)}</div>
+          ${m.texto ? `<div class="body">${escapeHtml(m.texto)}</div>` : ""}
+        `;
+
+        if (m.imagem_url) {
+          const img = document.createElement("img");
+          img.className = "chat-img";
+          img.src = m.imagem_url;
+          img.alt = "imagem";
+          bubble.appendChild(img);
+        }
+
+        wrap.appendChild(bubble);
+        box.appendChild(wrap);
+      });
+
+      if (forceScroll) box.scrollTop = box.scrollHeight;
+
+      // ✅ só marca como lido se chegou msg nova (e com throttle)
+      if (lastId && lastId !== lastRenderedLastId) {
+        lastRenderedLastId = lastId;
+
+        const now = Date.now();
+        if (now - lastMarkAt > 1500) {
+          lastMarkAt = now;
+          await markRead(currentOtherId);
+        }
+
+        // atualiza contatos (unread etc) só quando mudou
+        await loadContacts();
+      }
+    } finally {
+      historyLoading = false;
+    }
   }
 
   async function send() {
-    if (sending) return;          // ✅ bloqueia clique duplo / listener duplicado
+    if (sending) return;
     sending = true;
 
     try {
@@ -238,7 +272,7 @@ window.ChatUI = (() => {
   }
 
   function bindUIOnce() {
-    if (bound) return;   // ✅ aqui é o segredo
+    if (bound) return;
     bound = true;
 
     const sendBtn = document.getElementById("chatSendBtn");
@@ -255,24 +289,27 @@ window.ChatUI = (() => {
 
     if (exportBtn) exportBtn.addEventListener("click", (e) => {
       e.preventDefault();
-      // Se for admin/staff/coordenacao, pode exportar qualquer par via prompt.
-      // Caso contrário, exporta a conversa atual (eu x selecionado).
+
       const meId = document.getElementById("chatMeId")?.value;
       if (!meId) return;
+
       let u1 = meId;
       let u2 = currentOtherId;
       if (!u2) return;
+
       if (canExport) {
-        const ask = prompt("Exportar histórico.\n\nDigite dois usuários (ID ou username) separados por vírgula, ou deixe vazio para exportar a conversa atual.\nEx: hudson,gabriel");
+        const ask = prompt(
+          "Exportar histórico.\n\nDigite dois usuários (ID ou username) separados por vírgula, ou deixe vazio para exportar a conversa atual.\nEx: hudson,gabriel"
+        );
         if (ask && ask.includes(",")) {
           const parts = ask.split(",").map(s => s.trim()).filter(Boolean);
           if (parts.length >= 2) { u1 = parts[0]; u2 = parts[1]; }
         }
       }
+
       const url = `/chat/export/?u1=${encodeURIComponent(u1)}&u2=${encodeURIComponent(u2)}`;
       window.open(url, "_blank");
     });
-
 
     if (input) {
       input.addEventListener("keydown", (e) => {
@@ -286,7 +323,7 @@ window.ChatUI = (() => {
     if (emoji) {
       emoji.addEventListener("click", () => {
         if (!input) return;
-        const pick = prompt("Digite um emoji (ex: 😀😎🔥✅😃😄😁😆😅🤣😂🙂🙃😉😊😇🥰😍🤩😘😗☺️😚😙😋😛😜🤪😝🤑🤗🤭🤫🤔🤐🤨😐😑😶😶😏😒🙄😬😮‍💨🤥🫨🙂‍↔️🙂‍↕️😌😔😪🤤😴☹️😮😯😲😳🥺😦😧😨😰😥😢😭😱😖😣😞😓😩😫🥱😤😡😠🤬😈👿💀☠️💩🤡👹👺👻👽👾🤖😺😸😹😻😼😽🙀😿😾🙈🙉🙊💋💯💢💥💫💦💨🕳️💤👋🤚🖐️✋🖖👌🤏✌️🤞🤟🤘🤙👈👉👆🖕👇☝️✍️💅🤳💪🦾🦿🦵🦶👂🦻👃🧠🦷🦴👀👁️👅👄👶🧒👦👧🧑👱👨🧔👨‍🦰👨‍🦱👨‍🦳👨‍🦲👩👩‍🦰🧑‍🦰👩‍🦱🧑‍🦱👩‍🦳🧑‍🦳👩‍🦲🧑‍🦲👱‍♀️👱‍♂️🧓👴👵🙍🙍‍♂️🙍‍♀️🙎🙎‍♂️🙎‍♀️🙅🙅‍♂️🙅‍♀️🙆🙆‍♂️🙆‍♀️💁💁‍♂️💁‍♀️🙋🙋‍♂️🙋‍♀️🧏🧏‍♂️🧏‍♀️🙇🙇‍♂️🙇‍♀️🤦🤦‍♂️🤦‍♀️🤷🤷‍♂️🤷‍♀️🫅🤴👸👳👲🧕🤵👰🤰🤱👩‍🍼👨‍🍼🧑‍🍼💃🕺🛀🛌🧑‍🤝‍🧑👭👫👬💏👩‍❤️‍💋‍👨👨‍❤️‍💋‍👨👩‍❤️‍💋‍👩💑👩‍❤️‍👨👨‍❤️‍👨👩‍❤️‍👩💌💘💝💖💗💓💞💕💟❣️💔❤️‍🔥❤️‍🩹❤️):", "😀");
+        const pick = prompt("Digite um emoji:", "😀");
         if (pick) input.value = (input.value || "") + pick;
         input.focus();
       });
@@ -298,7 +335,6 @@ window.ChatUI = (() => {
   }
 
   async function start() {
-    // ✅ bind só uma vez (mesmo abrindo/fechando painel)
     bindUIOnce();
 
     enableConversationUI(false);
@@ -307,8 +343,9 @@ window.ChatUI = (() => {
     await loadContacts();
     await refreshUnreadBadge();
 
+    // ✅ ping mais leve (30s)
     if (pingTimer) clearInterval(pingTimer);
-    pingTimer = setInterval(() => doPing().catch(() => {}), 8000);
+    pingTimer = setInterval(() => doPing().catch(() => {}), 30000);
   }
 
   function escapeHtml(s) {

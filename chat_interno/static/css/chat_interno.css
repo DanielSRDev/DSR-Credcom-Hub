@@ -1,4 +1,6 @@
-/* static/css/chat_interno.css */
+/* ============================= */
+/*        CHAT INTERNO           */
+/* ============================= */
 
 .chat-overlay{
   position: fixed;
@@ -57,75 +59,81 @@
   cursor:pointer;
 }
 
+/* ============================= */
+/*           BODY GRID           */
+/* ============================= */
+
 .chat-body{
   display:grid;
   grid-template-columns: 320px 1fr;
-
-  /* MUITO IMPORTANTE */
   height: calc(100% - 54px);
   min-height: 0;
 }
 
-/* coluna esquerda (contatos) */
-.chat-body > div:first-child{
+.chat-body > div{
   min-height: 0;
 }
 
-/* coluna direita (conversa) */
-.chat-body > div:last-child{
-  min-height: 0;
-}
-
-/* garante que a coluna direita flex funciona e não empurra o footer */
 .chat-body .d-flex.flex-column{
   min-height: 0;
 }
 
-/* área das mensagens: só ela rola */
+/* ============================= */
+/*        AREA MENSAGENS         */
+/* ============================= */
+
 #chatMsgs{
-  overflow:auto !important;
+  overflow:auto;
   flex: 1 1 auto;
   min-height: 0;
+  padding: 12px;
 }
 
-/* barra de digitar: nunca some */
-.chat-input-fixed{
-  flex: 0 0 auto;
+/* impede stretch do bootstrap */
+#chatMsgs > .d-flex{
+  align-items: flex-start !important;
 }
 
-/* bubbles */
+/* ============================= */
+/*           BUBBLES             */
+/* ============================= */
+
 #chatMsgs .chat-bubble{
-  display: inline-block;
   width: fit-content;
-  max-width: 75%;
-  min-width: 48px;
+  max-width: min(75%, 520px);
+  min-width: 0;
+
+  flex: 0 0 auto;
+
   white-space: pre-wrap;
-  word-break: break-word;
+  overflow-wrap: anywhere;
+
   border-radius: 12px;
   padding: 10px 12px;
   box-shadow: 0 2px 10px rgba(0,0,0,.08);
 }
-#chatMsgs .chat-bubble .body{ line-height: 1.25; }
-#chatMsgs .chat-bubble .meta{ margin-bottom: 6px; }
 
-#chatMsgs .mine{
-  margin-left: auto;
+/* alinhamento */
+#chatMsgs .chat-bubble.mine{
   background: #2f7df6;
   color:#fff;
+  margin-left: auto;
 }
 
-#chatMsgs .theirs{
-  margin-right: auto;
+#chatMsgs .chat-bubble.theirs{
   background: #fff;
   color:#111;
+  margin-right: auto;
 }
 
-#chatMsgs .meta{
+/* meta info */
+#chatMsgs .chat-bubble .meta{
   font-size: 12px;
   opacity: .75;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
 }
 
+/* imagens dentro do chat */
 #chatMsgs img.chat-img{
   max-width: 320px;
   width: 100%;
@@ -134,8 +142,20 @@
   margin-top: 6px;
 }
 
-/* === Ajustes UX Chat === */
+/* ============================= */
+/*         INPUT FIXED           */
+/* ============================= */
+
+.chat-input-fixed{
+  flex: 0 0 auto;
+}
+
+/* ============================= */
+/*         UX AJUSTES            */
+/* ============================= */
+
 .chat-conv-head.active{ background:#e9f2ff !important; }
+
 .chat-selected-badge{
   font-size: 12px;
   font-weight: 700;
@@ -144,9 +164,33 @@
   padding: 4px 10px;
   border-radius: 999px;
 }
+
 #chatUserList .list-group-item.active{
   background:#e9f2ff;
   border-color:#cfe2ff;
   color:#0b5ed7;
 }
-#chatUserList .list-group-item.active .text-secondary{ color:#0b5ed7 !important; }
+
+#chatUserList .list-group-item.active .text-secondary{
+  color:#0b5ed7 !important;
+}
+
+
+/* ===== FORÇA FINAL: mata display:block e largura inflada ===== */
+#chatMsgs .chat-bubble{
+  display: inline-flex !important;   /* melhor que inline-block aqui */
+  flex-direction: column !important; /* meta em cima, texto embaixo */
+
+  width: fit-content !important;
+  max-width: min(75%, 520px) !important;
+
+  flex: 0 0 auto !important;
+  align-self: flex-start !important;
+
+  white-space: pre-wrap !important;
+  overflow-wrap: anywhere !important;
+}
+
+/* alinhamento por lado */
+#chatMsgs .chat-bubble.mine{ margin-left: auto !important; }
+#chatMsgs .chat-bubble.theirs{ margin-right: auto !important; }
