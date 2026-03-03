@@ -12,6 +12,34 @@ window.ChatUI = (() => {
   let lastRenderedLastId = 0;
   let lastMarkAt = 0;
 
+  // 🔊 controle do som
+  let lastSoundId = 0;
+  let lastUnreadTotal = 0;
+
+  // ✅ NOVO: ao abrir conversa, não tocar som do histórico antigo
+  let suppressHistorySound = false;
+
+  // 🔊 som de nova mensagem
+  const soundMsg = new Audio("/static/chat_interno/sounds/msg.mp3");
+  soundMsg.volume = 0.6;
+
+  function unlockAudioOnce() {
+    // Chrome bloqueia play automático; isso "autoriza" após 1 clique do usuário
+    document.addEventListener("click", () => {
+      soundMsg.play().then(() => {
+        soundMsg.pause();
+        soundMsg.currentTime = 0;
+      }).catch(() => {});
+    }, { once: true });
+  }
+
+  function playNewMessageSound() {
+    try {
+      soundMsg.currentTime = 0;
+      soundMsg.play().catch(() => {});
+    } catch {}
+  }
+
   function getCookie(name) {
     const v = `; ${document.cookie}`;
     const parts = v.split(`; ${name}=`);
@@ -49,6 +77,14 @@ window.ChatUI = (() => {
 
     const data = await apiGet("/chat/unread_total/");
     const count = Number(data.count || 0);
+
+    // 🔊 toca som só se aumentou E não tem conversa aberta
+    // (quando conversa está aberta, o som é tratado no loadHistory)
+    if (count > lastUnreadTotal && !currentOtherId) {
+      playNewMessageSound();
+    }
+
+    lastUnreadTotal = count;
 
     if (count > 0) {
       badge.style.display = "";
@@ -138,8 +174,12 @@ window.ChatUI = (() => {
   async function open(otherId, otherName = null) {
     currentOtherId = otherId;
 
+    // ✅ ao abrir conversa: renderiza histórico sem som
+    suppressHistorySound = true;
+
     // ✅ reset do controle quando troca de conversa
     lastRenderedLastId = 0;
+    lastSoundId = 0;
 
     const otherHidden = document.getElementById("chatOtherId");
     if (otherHidden) otherHidden.value = otherId;
@@ -160,7 +200,7 @@ window.ChatUI = (() => {
 
     await doPing();
     await loadContacts();
-    await loadHistory(true);
+    await loadHistory(true); // ← aqui NÃO toca som do histórico antigo
 
     // ✅ polling mais leve (4s). e sem empilhar por causa do lock.
     if (pollTimer) clearInterval(pollTimer);
@@ -181,7 +221,8 @@ window.ChatUI = (() => {
       if (!box) return;
 
       const items = data.items || [];
-      const lastId = items.length ? Number(items[items.length - 1].id) : 0;
+      const lastMsg = items.length ? items[items.length - 1] : null;
+      const lastId = lastMsg ? Number(lastMsg.id) : 0;
 
       // ✅ se não mudou e não é forçar scroll, não faz nada
       if (lastId && lastId === lastRenderedLastId && !forceScroll) {
@@ -216,8 +257,35 @@ window.ChatUI = (() => {
 
       if (forceScroll) box.scrollTop = box.scrollHeight;
 
-      // ✅ só marca como lido se chegou msg nova (e com throttle)
+      // ✅ se mudou, atualiza controles e toca som (se for msg do outro)
       if (lastId && lastId !== lastRenderedLastId) {
+
+        // ✅ se acabou de abrir conversa, não toca som.
+        // Apenas sincroniza os IDs pra próximos polls.
+        if (suppressHistorySound) {
+          lastSoundId = lastId;
+          lastRenderedLastId = lastId;
+          suppressHistorySound = false; // libera som daqui pra frente
+
+          // mesmo assim marca como lido e atualiza contatos
+          const now = Date.now();
+          if (now - lastMarkAt > 1500) {
+            lastMarkAt = now;
+            await markRead(currentOtherId);
+          }
+          await loadContacts();
+          return;
+        }
+
+        // 🔊 toca som somente se:
+        // - existe mensagem
+        // - a última mensagem NÃO é sua
+        // - ainda não tocou para esse id
+        if (lastMsg && !lastMsg.is_me && lastId !== lastSoundId) {
+          lastSoundId = lastId;
+          playNewMessageSound();
+        }
+
         lastRenderedLastId = lastId;
 
         const now = Date.now();
@@ -226,7 +294,6 @@ window.ChatUI = (() => {
           await markRead(currentOtherId);
         }
 
-        // atualiza contatos (unread etc) só quando mudou
         await loadContacts();
       }
     } finally {
@@ -337,6 +404,9 @@ window.ChatUI = (() => {
   async function start() {
     bindUIOnce();
 
+    // 🔊 libera som no primeiro clique
+    unlockAudioOnce();
+
     enableConversationUI(false);
 
     await doPing();
@@ -346,6 +416,11 @@ window.ChatUI = (() => {
     // ✅ ping mais leve (30s)
     if (pingTimer) clearInterval(pingTimer);
     pingTimer = setInterval(() => doPing().catch(() => {}), 30000);
+
+    // ✅ badge global (som quando chat fechado)
+    setInterval(() => {
+      refreshUnreadBadge().catch(() => {});
+    }, 4000);
   }
 
   function escapeHtml(s) {
