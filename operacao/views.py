@@ -243,7 +243,7 @@ def tarefa_deletar(request, tarefa_id: int):
         return HttpResponseForbidden("Sem permissão para deletar este chamado.")
 
     if request.method == "POST":
-        tarefa.delete()
+        tarefa.soft_delete(request.user)
         return go_back(request)
 
     return render(request, "operacao/tarefa_delete.html", {"tarefa": tarefa})

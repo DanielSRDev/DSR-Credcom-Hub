@@ -2,6 +2,9 @@ from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
+class TarefaManager(models.Manager):
+    def get_queryset(self):
+        return super().get_queryset().filter(deleted_at__isnull=True)
 
 class Equipe(models.Model):
     nome = models.CharField(max_length=80)
@@ -87,7 +90,33 @@ class Tarefa(models.Model):
             return False
         delta = self.prazo - timezone.now()
         return 0 < delta.total_seconds() <= 24 * 3600
+    # -----------------------
+    # Lixeira (soft delete)
+    # -----------------------
+    deleted_at = models.DateTimeField(null=True, blank=True)
+    deleted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name="operacao_tarefas_deletadas",
+    )
 
+    # Por padrão, o sistema só enxerga NÃO deletadas
+    objects = TarefaManager()
+    # Para o admin ver TUDO (inclusive deletadas)
+    all_objects = models.Manager()
+
+    def soft_delete(self, user=None):
+        if self.deleted_at:
+            return
+        self.deleted_at = timezone.now()
+        self.deleted_by = user
+        self.save(update_fields=["deleted_at", "deleted_by"])
+
+    def restore(self):
+        self.deleted_at = None
+        self.deleted_by = None
+        self.save(update_fields=["deleted_at", "deleted_by"])
 
 class Comentario(models.Model):
     tarefa = models.ForeignKey(Tarefa, on_delete=models.CASCADE, related_name="comentarios")

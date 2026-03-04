@@ -3,6 +3,10 @@ from django.db import models
 from django.conf import settings
 from django.utils import timezone
 
+class TarefaManager(models.Manager):
+    def get_queryset(self):
+        return super().get_queryset().filter(deleted_at__isnull=True)
+
 
 class Tarefa(models.Model):
     class Status(models.TextChoices):
@@ -55,6 +59,31 @@ class Tarefa(models.Model):
     executado_em = models.DateTimeField(null=True, blank=True)
     finalizado_em = models.DateTimeField(null=True, blank=True)
 
+    # -----------------------
+    # Lixeira (soft delete)
+    # -----------------------
+    deleted_at = models.DateTimeField(null=True, blank=True)
+    deleted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name="gestao_tarefas_deletadas",
+    )
+
+    objects = TarefaManager()
+    all_objects = models.Manager()
+
+    def soft_delete(self, user=None):
+        if self.deleted_at:
+            return
+        self.deleted_at = timezone.now()
+        self.deleted_by = user
+        self.save(update_fields=["deleted_at", "deleted_by"])
+
+    def restore(self):
+        self.deleted_at = None
+        self.deleted_by = None
+        self.save(update_fields=["deleted_at", "deleted_by"])
     # -----------------------
     # Regras de tempo/status
     # -----------------------

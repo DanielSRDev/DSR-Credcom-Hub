@@ -272,7 +272,7 @@ def deletar(request, pk: int):
         return HttpResponseForbidden("Somente superuser ou GESTAO_GESTORA pode deletar.")
 
     if request.method == "POST":
-        tarefa.delete()
+        tarefa.soft_delete(request.user)
         return redirect(_next_or(request, "/gestao/"))
 
     return render(request, "gestao/tarefa_delete.html", {"tarefa": tarefa})
