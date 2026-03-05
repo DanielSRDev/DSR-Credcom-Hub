@@ -12,4 +12,5 @@ urlpatterns = [
     path("send/<int:user_id>/", views.send_message, name="send_message"),
     path("mark_read/<int:user_id>/", views.mark_read, name="mark_read"),
     path("export/", views.export_history, name="export_history"),
+    path("api/status/", views.set_status, name="chat_set_status"),
 ]

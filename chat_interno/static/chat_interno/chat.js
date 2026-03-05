@@ -19,12 +19,14 @@ window.ChatUI = (() => {
   // ✅ NOVO: ao abrir conversa, não tocar som do histórico antigo
   let suppressHistorySound = false;
 
+  // ✅ NOVO: status atual do ME (para pintar botões)
+  let myStatus = "offline";
+
   // 🔊 som de nova mensagem
   const soundMsg = new Audio("/static/chat_interno/sounds/msg.mp3");
   soundMsg.volume = 0.6;
 
   function unlockAudioOnce() {
-    // Chrome bloqueia play automático; isso "autoriza" após 1 clique do usuário
     document.addEventListener("click", () => {
       soundMsg.play().then(() => {
         soundMsg.pause();
@@ -71,6 +73,35 @@ window.ChatUI = (() => {
     await apiPost("/chat/ping/", fd);
   }
 
+  function paintStatusButtons() {
+    const box = document.querySelector(".chat-status-box");
+    if (!box) return;
+
+    box.querySelectorAll("button.status").forEach(btn => {
+      const st = (btn.dataset.status || "").toLowerCase();
+      if (st === myStatus) btn.classList.add("active");
+      else btn.classList.remove("active");
+    });
+  }
+
+  async function setStatus(status) {
+    const fd = new FormData();
+    fd.append("status", status);
+
+    const data = await apiPost("/chat/api/status/", fd);
+
+    if (data?.error) {
+      alert(data.error);
+      return;
+    }
+
+    myStatus = data.status || status || "offline";
+    paintStatusButtons();
+
+    // ✅ reflete na lista na hora
+    await loadContacts();
+  }
+
   async function refreshUnreadBadge() {
     const badge = document.getElementById("chatUnreadBadge");
     if (!badge) return;
@@ -78,8 +109,6 @@ window.ChatUI = (() => {
     const data = await apiGet("/chat/unread_total/");
     const count = Number(data.count || 0);
 
-    // 🔊 toca som só se aumentou E não tem conversa aberta
-    // (quando conversa está aberta, o som é tratado no loadHistory)
     if (count > lastUnreadTotal && !currentOtherId) {
       playNewMessageSound();
     }
@@ -103,10 +132,17 @@ window.ChatUI = (() => {
   }
 
   function sortContacts(items) {
+    const weight = (st) => {
+      if (st === "online") return 2;
+      if (st === "ausente") return 1;
+      return 0;
+    };
+
     return (items || []).slice().sort((a, b) => {
-      const ao = a.online ? 1 : 0;
-      const bo = b.online ? 1 : 0;
-      if (ao !== bo) return bo - ao;
+      const aw = weight(a.status);
+      const bw = weight(b.status);
+      if (aw !== bw) return bw - aw;
+
       const an = (a.nome || a.username || "").toLowerCase();
       const bn = (b.nome || b.username || "").toLowerCase();
       return an.localeCompare(bn);
@@ -119,6 +155,11 @@ window.ChatUI = (() => {
     if (!list) return;
 
     canExport = !!data.can_export;
+
+    if (data.my_status) {
+      myStatus = data.my_status;
+      paintStatusButtons();
+    }
 
     list.innerHTML = "";
     const items = sortContacts(data.items || []);
@@ -136,16 +177,24 @@ window.ChatUI = (() => {
       const nm = (u.nome || u.username);
       btn.onclick = () => open(u.id, nm);
 
+      const statusTxt =
+        u.status === "online" ? "🟢 Online" :
+        (u.status === "ausente" ? "🟡 Ausente" : "⚪ Offline");
+
       btn.innerHTML = `
         <div class="fw-semibold">${escapeHtml(u.nome || u.username)}</div>
         <div class="small text-secondary">
-          ${u.online ? "🟢 Online" : "⚪ Offline"}
+          ${statusTxt}
           ${u.unread ? ` • <b>${u.unread}</b> nova(s)` : ""}
         </div>
       `;
+
       if (Number(u.id) === Number(currentOtherId)) btn.classList.add("active");
       list.appendChild(btn);
     });
+
+    // tenta pintar botões com base em algo que já sabemos
+    paintStatusButtons();
   }
 
   function enableConversationUI(on) {
@@ -174,10 +223,7 @@ window.ChatUI = (() => {
   async function open(otherId, otherName = null) {
     currentOtherId = otherId;
 
-    // ✅ ao abrir conversa: renderiza histórico sem som
     suppressHistorySound = true;
-
-    // ✅ reset do controle quando troca de conversa
     lastRenderedLastId = 0;
     lastSoundId = 0;
 
@@ -188,29 +234,23 @@ window.ChatUI = (() => {
 
     const hint = document.getElementById("chatHint");
     if (hint) hint.textContent = otherName ? `Conversa com: ${otherName}` : "Conversa aberta.";
+
     const head = document.getElementById("chatConvHead");
     if (head) head.classList.add("active");
-    const badge = document.getElementById("chatSelectedBadge");
-    if (badge) {
-      if (otherName) { badge.textContent = otherName; badge.classList.remove("d-none"); }
-      else { badge.classList.add("d-none"); }
-    }
 
     setActiveContact(otherId);
 
     await doPing();
     await loadContacts();
-    await loadHistory(true); // ← aqui NÃO toca som do histórico antigo
+    await loadHistory(true);
 
-    // ✅ polling mais leve (4s). e sem empilhar por causa do lock.
     if (pollTimer) clearInterval(pollTimer);
     pollTimer = setInterval(() => loadHistory(false), 4000);
   }
 
   async function loadHistory(forceScroll) {
     if (!currentOtherId) return;
-
-    if (historyLoading) return; // 🔒 trava concorrência
+    if (historyLoading) return;
     historyLoading = true;
 
     try {
@@ -224,12 +264,10 @@ window.ChatUI = (() => {
       const lastMsg = items.length ? items[items.length - 1] : null;
       const lastId = lastMsg ? Number(lastMsg.id) : 0;
 
-      // ✅ se não mudou e não é forçar scroll, não faz nada
       if (lastId && lastId === lastRenderedLastId && !forceScroll) {
         return;
       }
 
-      // render
       box.innerHTML = "";
       items.forEach((m) => {
         const wrap = document.createElement("div");
@@ -257,17 +295,12 @@ window.ChatUI = (() => {
 
       if (forceScroll) box.scrollTop = box.scrollHeight;
 
-      // ✅ se mudou, atualiza controles e toca som (se for msg do outro)
       if (lastId && lastId !== lastRenderedLastId) {
-
-        // ✅ se acabou de abrir conversa, não toca som.
-        // Apenas sincroniza os IDs pra próximos polls.
         if (suppressHistorySound) {
           lastSoundId = lastId;
           lastRenderedLastId = lastId;
-          suppressHistorySound = false; // libera som daqui pra frente
+          suppressHistorySound = false;
 
-          // mesmo assim marca como lido e atualiza contatos
           const now = Date.now();
           if (now - lastMarkAt > 1500) {
             lastMarkAt = now;
@@ -277,10 +310,6 @@ window.ChatUI = (() => {
           return;
         }
 
-        // 🔊 toca som somente se:
-        // - existe mensagem
-        // - a última mensagem NÃO é sua
-        // - ainda não tocou para esse id
         if (lastMsg && !lastMsg.is_me && lastId !== lastSoundId) {
           lastSoundId = lastId;
           playNewMessageSound();
@@ -403,8 +432,6 @@ window.ChatUI = (() => {
 
   async function start() {
     bindUIOnce();
-
-    // 🔊 libera som no primeiro clique
     unlockAudioOnce();
 
     enableConversationUI(false);
@@ -413,14 +440,15 @@ window.ChatUI = (() => {
     await loadContacts();
     await refreshUnreadBadge();
 
-    // ✅ ping mais leve (30s)
     if (pingTimer) clearInterval(pingTimer);
     pingTimer = setInterval(() => doPing().catch(() => {}), 30000);
 
-    // ✅ badge global (som quando chat fechado)
     setInterval(() => {
       refreshUnreadBadge().catch(() => {});
     }, 4000);
+
+    // ✅ pinta botões ao iniciar
+    paintStatusButtons();
   }
 
   function escapeHtml(s) {
@@ -441,5 +469,6 @@ window.ChatUI = (() => {
     }
   }
 
-  return { start, open, send };
+  // ✅ EXPORTA TUDO QUE O HTML PRECISA
+  return { start, open, send, setStatus };
 })();

@@ -6,6 +6,7 @@ from django.http import JsonResponse, HttpResponse
 from django.shortcuts import get_object_or_404
 from django.views.decorators.http import require_GET, require_POST
 from django.contrib.auth import get_user_model
+from .models import ChatPresence
 
 from .services import (
     allowed_contacts,
@@ -17,6 +18,7 @@ from .services import (
     list_messages_between,
     send_text,
     mark_read_conversation,
+    effective_status,
 )
 
 User = get_user_model()
@@ -57,13 +59,18 @@ def contacts(request):
                 "id": u.id,
                 "username": u.get_username(),
                 "nome": (getattr(u, "get_full_name", lambda: "")() or u.get_username()),
-                "online": is_online(u.id),
                 "unread": unread_map.get(u.id, 0),
                 "can_send": can_send_to(user, u),
+                "online": is_online(u.id),
+                "status": effective_status(u),
             }
         )
 
-    return JsonResponse({"items": items, "can_export": can_export_admin(user)})
+    return JsonResponse({
+    "items": items,
+    "can_export": can_export_admin(user),
+    "my_status": effective_status(user),
+})
 
 
 @login_required
@@ -181,3 +188,21 @@ def export_history(request):
         ])
 
     return resp
+
+
+@login_required
+@require_POST
+def set_status(request):
+    status = request.POST.get("status")
+
+    if status not in ["online", "ausente", "offline"]:
+        return JsonResponse({"error": "status inválido"}, status=400)
+
+    presence, _ = ChatPresence.objects.get_or_create(user=request.user)
+    presence.status = status
+    presence.save()
+
+    return JsonResponse({
+        "ok": True,
+        "status": presence.status
+    })

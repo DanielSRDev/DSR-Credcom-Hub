@@ -170,3 +170,5 @@ class Comentario(models.Model):
 
     def __str__(self):
         return f"Comentario({self.id}) tarefa {self.tarefa_id}"
+    
+

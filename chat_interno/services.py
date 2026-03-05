@@ -5,7 +5,7 @@ from django.utils import timezone
 from django.contrib.auth import get_user_model
 from django.db.models import Q, Count
 
-from .models import Conversation, Message, ChatVinculoOperador
+from .models import Conversation, Message, ChatVinculoOperador, ChatPresence
 
 User = get_user_model()
 
@@ -64,18 +64,57 @@ def can_send_to(me, other) -> bool:
 # PRESENÇA
 # ==========
 
-_last_ping = {}  # user_id -> datetime
+def _get_presence(user):
+    """
+    Presence persistente no banco (não depende de memória do processo).
+    - status: online/ausente/offline (preferência do usuário)
+    - updated_at: usado como "último ping" para saber se está ativo de verdade
+    """
+    presence, _ = ChatPresence.objects.get_or_create(user=user)
+    return presence
 
 
 def ping_user(user):
-    _last_ping[user.id] = timezone.now()
+    """
+    Atualiza o heartbeat do usuário.
+    NÃO muda o status escolhido (online/ausente/offline) — só atualiza o updated_at.
+    """
+    presence = _get_presence(user)
+    # auto_now atualiza no save()
+    presence.save(update_fields=["updated_at"])
+
+
+def effective_status(user) -> str:
+    """
+    Status efetivo pra UI:
+    - Se usuário marcou OFFLINE: sempre offline.
+    - Se o último ping passou do TTL: offline (mesmo que ele tenha marcado online/ausente).
+    - Caso contrário, respeita o status escolhido: online ou ausente.
+    """
+    presence = _get_presence(user)
+
+    if presence.status == ChatPresence.Status.OFFLINE:
+        return "offline"
+
+    # sem ping recente => offline
+    if timezone.now() - presence.updated_at > timedelta(seconds=ONLINE_TTL_SECONDS):
+        return "offline"
+
+    if presence.status == ChatPresence.Status.AUSENTE:
+        return "ausente"
+
+    return "online"
 
 
 def is_online(user_id: int) -> bool:
-    ts = _last_ping.get(user_id)
-    if not ts:
+    """
+    Mantém compatibilidade com código antigo que espera boolean.
+    """
+    try:
+        user = User.objects.get(id=user_id)
+    except User.DoesNotExist:
         return False
-    return timezone.now() - ts <= timedelta(seconds=ONLINE_TTL_SECONDS)
+    return effective_status(user) == "online"
 
 
 # ==========

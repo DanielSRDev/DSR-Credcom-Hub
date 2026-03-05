@@ -20,6 +20,24 @@
       <div class="text-secondary small">Nenhum contato disponível para você.</div>
     {% endfor %}
   </div>
+
+
+  <div class="chat-status-box">
+
+    <button data-status="online" onclick="ChatUI.setStatus('online')" class="status online">
+      🟢 Online
+    </button>
+
+    <button data-status="ausente" onclick="ChatUI.setStatus('ausente')" class="status away">
+      🟡 Ausente
+    </button>
+
+    <button data-status="offline" onclick="ChatUI.setStatus('offline')" class="status offline">
+      ⚫ Offline
+    </button>
+
+  </div>
+
 </div>
 
 <!-- JS do chat (AGORA VAI EXISTIR NO STATIC) -->

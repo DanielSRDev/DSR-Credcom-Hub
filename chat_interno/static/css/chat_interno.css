@@ -194,3 +194,39 @@
 /* alinhamento por lado */
 #chatMsgs .chat-bubble.mine{ margin-left: auto !important; }
 #chatMsgs .chat-bubble.theirs{ margin-right: auto !important; }
+
+
+.chat-status-box{
+    display:flex;
+    gap:8px;
+    margin-top:8px;
+}
+
+.chat-status-box button{
+    border:none;
+    padding:6px 10px;
+    border-radius:6px;
+    font-size:12px;
+    cursor:pointer;
+}
+
+.status.online{
+    background:#e6f7ea;
+    color:#1a7f37;
+}
+
+.status.away{
+    background:#fff5e6;
+    color:#b26b00;
+}
+
+.status.offline{
+    background:#f3f3f3;
+    color:#555;
+}
+
+/* destaca o status selecionado */
+.chat-status-box button.active{
+  box-shadow: 0 0 0 2px rgba(0,0,0,.18) inset;
+  font-weight: 600;
+}

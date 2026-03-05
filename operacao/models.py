@@ -160,3 +160,5 @@ class Anexo(models.Model):
 
     def __str__(self):
         return f"Anexo {self.id} - Tarefa {self.tarefa_id}"
+
+

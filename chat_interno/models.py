@@ -52,3 +52,25 @@ class ChatVinculoOperador(models.Model):
 
     def __str__(self):
         return f"{self.operador} -> {self.supervisor}"
+    
+
+class ChatPresence(models.Model):
+
+    class Status(models.TextChoices):
+        ONLINE = "online", "Online"
+        AUSENTE = "ausente", "Ausente"
+        OFFLINE = "offline", "Offline"
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="chat_presence"
+    )
+
+    status = models.CharField(
+        max_length=10,
+        choices=Status.choices,
+        default=Status.OFFLINE
+    )
+
+    updated_at = models.DateTimeField(auto_now=True)
