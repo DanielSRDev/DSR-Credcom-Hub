@@ -6,7 +6,8 @@ from django.http import JsonResponse, HttpResponse
 from django.shortcuts import get_object_or_404
 from django.views.decorators.http import require_GET, require_POST
 from django.contrib.auth import get_user_model
-from .models import ChatPresence
+from .models import ChatPresence, ChatMonitorConfig
+
 
 from .services import (
     allowed_contacts,
@@ -22,6 +23,33 @@ from .services import (
 )
 
 User = get_user_model()
+
+def can_monitor_chat(user) -> bool:
+    if not user or not user.is_authenticated:
+        return False
+    if user.is_superuser or user.is_staff:
+        return True
+    cfg = getattr(user, "chat_monitor_config", None)
+    return bool(cfg and cfg.can_monitor)
+
+
+def get_actor_user(request):
+    me = request.user
+    as_user = (request.GET.get("as_user") or "").strip()
+
+    if not as_user:
+        return me
+
+    if not can_monitor_chat(me):
+        return me
+
+    if not as_user.isdigit():
+        return me
+
+    try:
+        return User.objects.get(id=int(as_user))
+    except User.DoesNotExist:
+        return me
 
 
 def can_export_admin(user) -> bool:
@@ -49,28 +77,41 @@ def ping(request):
 @login_required
 @require_GET
 def contacts(request):
-    user = request.user
-    unread_map = unread_by_contact(user)
+    me = request.user
+    actor = get_actor_user(request)
+
+    unread_map = unread_by_contact(actor)
 
     items = []
-    for u in allowed_contacts(user).order_by("username"):
+    for u in allowed_contacts(actor).order_by("username"):
         items.append(
             {
                 "id": u.id,
                 "username": u.get_username(),
                 "nome": (getattr(u, "get_full_name", lambda: "")() or u.get_username()),
                 "unread": unread_map.get(u.id, 0),
-                "can_send": can_send_to(user, u),
+                "can_send": can_send_to(actor, u),
                 "online": is_online(u.id),
                 "status": effective_status(u),
             }
         )
 
+    monitor_users = []
+    if can_monitor_chat(me):
+        monitor_users = list(
+            User.objects.all()
+            .order_by("username")
+            .values("id", "username")
+        )
+
     return JsonResponse({
-    "items": items,
-    "can_export": can_export_admin(user),
-    "my_status": effective_status(user),
-})
+        "items": items,
+        "can_export": can_export_admin(me),
+        "my_status": effective_status(me),
+        "can_monitor": can_monitor_chat(me),
+        "actor_id": actor.id,
+        "monitor_users": monitor_users,
+    })
 
 
 @login_required
@@ -83,12 +124,13 @@ def unread_total(request):
 @require_GET
 def history(request, user_id: int):
     me = request.user
+    actor = get_actor_user(request)
     other = get_object_or_404(User, id=user_id)
 
-    if not (can_send_to(me, other) or can_send_to(other, me)):
+    if not (can_send_to(actor, other) or can_send_to(other, actor)):
         return JsonResponse({"error": "Sem permissão."}, status=403)
 
-    msgs, conv = list_messages_between(me, other)
+    msgs, conv = list_messages_between(actor, other)
 
     items = []
     for m in msgs:
@@ -99,7 +141,7 @@ def history(request, user_id: int):
                 "texto": m.texto or "",
                 "imagem_url": (m.imagem.url if getattr(m, "imagem", None) else None),
                 "criado_em": m.criado_em.isoformat(),
-                "is_me": m.sender_id == me.id,
+                "is_me": m.sender_id == actor.id,
             }
         )
 
@@ -110,6 +152,11 @@ def history(request, user_id: int):
 @require_POST
 def send_message(request, user_id: int):
     me = request.user
+    actor = get_actor_user(request)
+
+    if actor.id != me.id:
+        return JsonResponse({"error": "Modo monitor: somente visualização."}, status=403)
+
     other = get_object_or_404(User, id=user_id)
 
     if not can_send_to(me, other):
@@ -123,25 +170,27 @@ def send_message(request, user_id: int):
 
     msg = send_text(me, other, texto, imagem=imagem)
 
-    return JsonResponse(
-        {
-            "ok": True,
-            "msg": {
-                "id": msg.id,
-                "sender_id": msg.sender_id,
-                "texto": msg.texto or "",
-                "imagem_url": (msg.imagem.url if msg.imagem else None),
-                "criado_em": msg.criado_em.isoformat(),
-                "is_me": True,
-            },
-        }
-    )
-
+    return JsonResponse({
+        "ok": True,
+        "msg": {
+            "id": msg.id,
+            "sender_id": msg.sender_id,
+            "texto": msg.texto or "",
+            "imagem_url": (msg.imagem.url if msg.imagem else None),
+            "criado_em": msg.criado_em.isoformat(),
+            "is_me": True,
+        },
+    })
 
 @login_required
 @require_POST
 def mark_read(request, user_id: int):
     me = request.user
+    actor = get_actor_user(request)
+
+    if actor.id != me.id:
+        return JsonResponse({"ok": True, "updated": 0})
+
     other = get_object_or_404(User, id=user_id)
 
     if not (can_send_to(me, other) or can_send_to(other, me)):

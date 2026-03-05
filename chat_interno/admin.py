@@ -1,9 +1,15 @@
 from django.contrib import admin
 from django.contrib.auth import get_user_model
+from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 from django.http import HttpResponse
 import csv
 
-from .models import Conversation, Message, ChatVinculoOperador
+from .models import (
+    Conversation,
+    Message,
+    ChatVinculoOperador,
+    ChatMonitorConfig,
+)
 
 User = get_user_model()
 
@@ -71,9 +77,7 @@ def exportar_conversa(modeladmin, request, queryset):
     writer.writerow(["data", "de", "para", "mensagem"])
 
     for m in msgs:
-        # Descobrir "para" (o outro usuário da conversa)
         other = m.conversation.user2 if m.sender_id == m.conversation.user1_id else m.conversation.user1
-
         writer.writerow([
             m.criado_em.strftime("%Y-%m-%d %H:%M:%S"),
             m.sender.username,
@@ -90,3 +94,20 @@ class MessageAdmin(admin.ModelAdmin):
     search_fields = ("texto", "sender__username", "conversation__user1__username", "conversation__user2__username")
     list_filter = ("criado_em", Usuario1Filter, Usuario2Filter)
     actions = [exportar_conversa]
+
+
+class ChatMonitorConfigInline(admin.StackedInline):
+    model = ChatMonitorConfig
+    can_delete = False
+    extra = 0
+
+
+try:
+    admin.site.unregister(User)
+except admin.sites.NotRegistered:
+    pass
+
+
+@admin.register(User)
+class CustomUserAdmin(DjangoUserAdmin):
+    inlines = [ChatMonitorConfigInline]

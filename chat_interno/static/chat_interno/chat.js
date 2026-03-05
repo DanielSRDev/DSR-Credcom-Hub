@@ -4,6 +4,10 @@ window.ChatUI = (() => {
   let pingTimer = null;
   let canExport = false;
 
+  // ✅ monitor
+  let actorUserId = ""; // "" = minha visão
+  let monitorBound = false;
+
   let bound = false;      // ✅ garante 1 bind só
   let sending = false;    // ✅ trava duplo envio
   let historyLoading = false;
@@ -16,10 +20,10 @@ window.ChatUI = (() => {
   let lastSoundId = 0;
   let lastUnreadTotal = 0;
 
-  // ✅ NOVO: ao abrir conversa, não tocar som do histórico antigo
+  // ✅ ao abrir conversa, não tocar som do histórico antigo
   let suppressHistorySound = false;
 
-  // ✅ NOVO: status atual do ME (para pintar botões)
+  // ✅ status atual do ME (para pintar botões)
   let myStatus = "offline";
 
   // 🔊 som de nova mensagem
@@ -53,13 +57,19 @@ window.ChatUI = (() => {
     return getCookie("csrftoken");
   }
 
+  function withActor(url) {
+    if (!actorUserId) return url;
+    const sep = url.includes("?") ? "&" : "?";
+    return `${url}${sep}as_user=${encodeURIComponent(actorUserId)}`;
+  }
+
   async function apiGet(url) {
-    const r = await fetch(url, { credentials: "same-origin" });
+    const r = await fetch(withActor(url), { credentials: "same-origin" });
     return await r.json();
   }
 
   async function apiPost(url, formData) {
-    const r = await fetch(url, {
+    const r = await fetch(withActor(url), {
       method: "POST",
       body: formData,
       credentials: "same-origin",
@@ -106,9 +116,13 @@ window.ChatUI = (() => {
     const badge = document.getElementById("chatUnreadBadge");
     if (!badge) return;
 
+    // ✅ opcional: se estiver monitorando, não apita (se quiser, remova essa linha)
+    // if (actorUserId) return;
+
     const data = await apiGet("/chat/unread_total/");
     const count = Number(data.count || 0);
 
+    // só apita se aumentou e não tem conversa aberta
     if (count > lastUnreadTotal && !currentOtherId) {
       playNewMessageSound();
     }
@@ -126,6 +140,10 @@ window.ChatUI = (() => {
 
   async function markRead(otherId) {
     if (!otherId) return;
+
+    // ✅ modo monitor: não marca como lido no front (backend também já ignora)
+    if (actorUserId) return;
+
     const fd = new FormData();
     await apiPost(`/chat/mark_read/${otherId}/`, fd);
     await refreshUnreadBadge();
@@ -147,54 +165,6 @@ window.ChatUI = (() => {
       const bn = (b.nome || b.username || "").toLowerCase();
       return an.localeCompare(bn);
     });
-  }
-
-  async function loadContacts() {
-    const data = await apiGet("/chat/contacts/");
-    const list = document.getElementById("chatUserList");
-    if (!list) return;
-
-    canExport = !!data.can_export;
-
-    if (data.my_status) {
-      myStatus = data.my_status;
-      paintStatusButtons();
-    }
-
-    list.innerHTML = "";
-    const items = sortContacts(data.items || []);
-
-    if (items.length === 0) {
-      list.innerHTML = `<div class="text-secondary small">Nenhum contato disponível para você.</div>`;
-      return;
-    }
-
-    items.forEach((u) => {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "list-group-item list-group-item-action";
-      btn.dataset.userId = u.id;
-      const nm = (u.nome || u.username);
-      btn.onclick = () => open(u.id, nm);
-
-      const statusTxt =
-        u.status === "online" ? "🟢 Online" :
-        (u.status === "ausente" ? "🟡 Ausente" : "⚪ Offline");
-
-      btn.innerHTML = `
-        <div class="fw-semibold">${escapeHtml(u.nome || u.username)}</div>
-        <div class="small text-secondary">
-          ${statusTxt}
-          ${u.unread ? ` • <b>${u.unread}</b> nova(s)` : ""}
-        </div>
-      `;
-
-      if (Number(u.id) === Number(currentOtherId)) btn.classList.add("active");
-      list.appendChild(btn);
-    });
-
-    // tenta pintar botões com base em algo que já sabemos
-    paintStatusButtons();
   }
 
   function enableConversationUI(on) {
@@ -220,6 +190,106 @@ window.ChatUI = (() => {
     });
   }
 
+  async function loadContacts() {
+    const data = await apiGet("/chat/contacts/");
+    const list = document.getElementById("chatUserList");
+    if (!list) return;
+
+    canExport = !!data.can_export;
+
+    // ✅ status do ME
+    if (data.my_status) {
+      myStatus = data.my_status;
+      paintStatusButtons();
+    }
+
+    // ✅ MONITOR
+    const box = document.getElementById("chatMonitorBox");
+    const sel = document.getElementById("chatMonitorSelect");
+
+    if (data.can_monitor && box && sel) {
+      box.style.display = "";
+
+      // options
+      const current = String(actorUserId || "");
+      sel.innerHTML = `<option value="">Minha visão</option>`;
+      (data.monitor_users || []).forEach(u => {
+        const opt = document.createElement("option");
+        opt.value = String(u.id);
+        opt.textContent = u.username;
+        if (opt.value === current) opt.selected = true;
+        sel.appendChild(opt);
+      });
+
+      // bind 1x
+      if (!monitorBound) {
+        monitorBound = true;
+        sel.addEventListener("change", async () => {
+          actorUserId = sel.value || "";
+
+          // fecha conversa atual quando troca o modo
+          currentOtherId = null;
+          const otherHidden = document.getElementById("chatOtherId");
+          if (otherHidden) otherHidden.value = "";
+
+          // limpa mensagens
+          const msgs = document.getElementById("chatMsgs");
+          if (msgs) msgs.innerHTML = "";
+
+          // hint
+          const hint = document.getElementById("chatHint");
+          if (hint) hint.textContent = actorUserId
+            ? `Monitorando usuário selecionado`
+            : "Selecione um contato.";
+
+          // desliga UI de conversa enquanto não abrir contato
+          enableConversationUI(false);
+
+          // recarrega contatos no novo contexto
+          await loadContacts();
+        });
+      }
+    } else if (box) {
+      box.style.display = "none";
+    }
+
+    // lista de contatos
+    list.innerHTML = "";
+    const items = sortContacts(data.items || []);
+
+    if (items.length === 0) {
+      list.innerHTML = `<div class="text-secondary small">Nenhum contato disponível para você.</div>`;
+      return;
+    }
+
+    items.forEach((u) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "list-group-item list-group-item-action";
+      btn.dataset.userId = u.id;
+
+      const nm = (u.nome || u.username);
+      btn.onclick = () => open(u.id, nm);
+
+      const statusTxt =
+        u.status === "online" ? "🟢 Online" :
+        (u.status === "ausente" ? "🟡 Ausente" : "⚪ Offline");
+
+      btn.innerHTML = `
+        <div class="fw-semibold">${escapeHtml(u.nome || u.username)}</div>
+        <div class="small text-secondary">
+          ${statusTxt}
+          ${u.unread ? ` • <b>${u.unread}</b> nova(s)` : ""}
+        </div>
+      `;
+
+      if (Number(u.id) === Number(currentOtherId)) btn.classList.add("active");
+      list.appendChild(btn);
+    });
+
+    paintStatusButtons();
+  }
+
   async function open(otherId, otherName = null) {
     currentOtherId = otherId;
 
@@ -230,7 +300,13 @@ window.ChatUI = (() => {
     const otherHidden = document.getElementById("chatOtherId");
     if (otherHidden) otherHidden.value = otherId;
 
+    // ✅ habilita UI normalmente
     enableConversationUI(true);
+
+    // ✅ mas se estiver em modo monitor, vira leitura (desativa input/enviar)
+    if (actorUserId) {
+      enableConversationUI(false);
+    }
 
     const hint = document.getElementById("chatHint");
     if (hint) hint.textContent = otherName ? `Conversa com: ${otherName}` : "Conversa aberta.";
@@ -331,6 +407,12 @@ window.ChatUI = (() => {
   }
 
   async function send() {
+    // ✅ modo monitor: bloqueia envio no front também
+    if (actorUserId) {
+      alert("Modo monitor: somente visualização.");
+      return;
+    }
+
     if (sending) return;
     sending = true;
 
@@ -389,7 +471,8 @@ window.ChatUI = (() => {
       const meId = document.getElementById("chatMeId")?.value;
       if (!meId) return;
 
-      let u1 = meId;
+      // ✅ se estiver monitorando, exporta como o actor (alvo)
+      let u1 = actorUserId || meId;
       let u2 = currentOtherId;
       if (!u2) return;
 
@@ -447,7 +530,6 @@ window.ChatUI = (() => {
       refreshUnreadBadge().catch(() => {});
     }, 4000);
 
-    // ✅ pinta botões ao iniciar
     paintStatusButtons();
   }
 
@@ -469,6 +551,5 @@ window.ChatUI = (() => {
     }
   }
 
-  // ✅ EXPORTA TUDO QUE O HTML PRECISA
   return { start, open, send, setStatus };
 })();

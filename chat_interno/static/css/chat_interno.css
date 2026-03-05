@@ -230,3 +230,27 @@
   box-shadow: 0 0 0 2px rgba(0,0,0,.18) inset;
   font-weight: 600;
 }
+
+
+.chat-left-col{
+  height: 100%;
+  min-height: 0;
+}
+
+.chat-left-col .d-flex.flex-column{
+  height: 100%;
+  min-height: 0;
+}
+
+#chatUserList{
+  flex: 1 1 auto;
+  min-height: 220px;
+}
+
+.chat-monitor-box{
+  margin-top: 6px;
+}
+
+.chat-monitor-box select{
+  font-size: 12px;
+}

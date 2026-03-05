@@ -74,3 +74,16 @@ class ChatPresence(models.Model):
     )
 
     updated_at = models.DateTimeField(auto_now=True)
+
+
+
+class ChatMonitorConfig(models.Model):
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="chat_monitor_config"
+    )
+    can_monitor = models.BooleanField(default=False)
+
+    def __str__(self):
+        return f"{self.user} monitor={self.can_monitor}"
