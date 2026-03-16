@@ -1,7 +1,13 @@
+from datetime import timedelta
+
 from django import forms
 from django.contrib.auth.models import User
+from django.utils import timezone
 
 from .models import Tarefa, Comentario, Anexo
+
+
+PRAZO_MINIMO_HORAS = 1
 
 
 # ===============================
@@ -42,6 +48,15 @@ class TarefaForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         self.user = user
 
+        agora_local = timezone.localtime()
+        prazo_minimo = agora_local + timedelta(hours=PRAZO_MINIMO_HORAS)
+
+        # ajuda visual no input do navegador
+        self.fields["prazo"].widget.attrs["min"] = prazo_minimo.strftime("%Y-%m-%dT%H:%M")
+
+        if self.instance and self.instance.pk and self.instance.prazo:
+            self.initial["prazo"] = timezone.localtime(self.instance.prazo).strftime("%Y-%m-%dT%H:%M")
+
         if not user:
             return
 
@@ -74,6 +89,23 @@ class TarefaForm(forms.ModelForm):
         # OPERADOR → só ele mesmo
         # ===============================
         self.fields["atribuida_para"].queryset = User.objects.filter(id=user.id)
+
+    def clean_prazo(self):
+        prazo = self.cleaned_data.get("prazo")
+        if not prazo:
+            return prazo
+
+        agora = timezone.now()
+        prazo_minimo = agora + timedelta(hours=PRAZO_MINIMO_HORAS)
+
+        if prazo < prazo_minimo:
+            minimo_formatado = timezone.localtime(prazo_minimo).strftime("%d/%m/%Y %H:%M")
+            raise forms.ValidationError(
+                f"O prazo mínimo deve ser de pelo menos {PRAZO_MINIMO_HORAS} hora(s) a partir de agora. "
+                f"Escolha um horário igual ou posterior a {minimo_formatado}."
+            )
+
+        return prazo
 
 
 # ===============================

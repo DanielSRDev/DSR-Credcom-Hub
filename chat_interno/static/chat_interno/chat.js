@@ -1,32 +1,26 @@
 window.ChatUI = (() => {
   let currentOtherId = null;
   let pollTimer = null;
-  let pingTimer = null;
+  let unreadTimer = null;
   let canExport = false;
+  let started = false;
 
-  // ✅ monitor
-  let actorUserId = ""; // "" = minha visão
+  let actorUserId = "";
   let monitorBound = false;
 
-  let bound = false;      // ✅ garante 1 bind só
-  let sending = false;    // ✅ trava duplo envio
+  let bound = false;
+  let sending = false;
   let historyLoading = false;
 
-  // ✅ controle de mudança
   let lastRenderedLastId = 0;
   let lastMarkAt = 0;
 
-  // 🔊 controle do som
   let lastSoundId = 0;
   let lastUnreadTotal = 0;
 
-  // ✅ ao abrir conversa, não tocar som do histórico antigo
   let suppressHistorySound = false;
-
-  // ✅ status atual do ME (para pintar botões)
   let myStatus = "offline";
 
-  // 🔊 som de nova mensagem
   const soundMsg = new Audio("/static/chat_interno/sounds/msg.mp3");
   soundMsg.volume = 0.6;
 
@@ -43,6 +37,38 @@ window.ChatUI = (() => {
     try {
       soundMsg.currentTime = 0;
       soundMsg.play().catch(() => {});
+    } catch {}
+  }
+
+  async function ensureNotificationPermission() {
+    if (!("Notification" in window)) return false;
+    if (Notification.permission === "granted") return true;
+    if (Notification.permission === "default") {
+      const result = await Notification.requestPermission();
+      return result === "granted";
+    }
+    return false;
+  }
+
+  function showDesktopNotification(title, body) {
+    if (!("Notification" in window)) return;
+    if (Notification.permission !== "granted") return;
+
+    try {
+      const n = new Notification(title, {
+        body: body || "Você recebeu uma nova mensagem.",
+        tag: currentOtherId ? `chat-conv-${currentOtherId}` : "chat-conv",
+        renotify: true,
+      });
+
+      n.onclick = function () {
+        window.focus();
+        n.close();
+      };
+
+      setTimeout(() => {
+        try { n.close(); } catch {}
+      }, 8000);
     } catch {}
   }
 
@@ -64,8 +90,13 @@ window.ChatUI = (() => {
   }
 
   async function apiGet(url) {
-    const r = await fetch(withActor(url), { credentials: "same-origin" });
-    return await r.json();
+    const r = await fetch(withActor(url), {
+      credentials: "same-origin",
+      headers: {
+        "X-Requested-With": "XMLHttpRequest"
+      }
+    });
+    return await r.json().catch(() => ({}));
   }
 
   async function apiPost(url, formData) {
@@ -73,7 +104,10 @@ window.ChatUI = (() => {
       method: "POST",
       body: formData,
       credentials: "same-origin",
-      headers: { "X-CSRFToken": csrf() },
+      headers: {
+        "X-CSRFToken": csrf(),
+        "X-Requested-With": "XMLHttpRequest"
+      },
     });
     return await r.json().catch(() => ({}));
   }
@@ -108,7 +142,13 @@ window.ChatUI = (() => {
     myStatus = data.status || status || "offline";
     paintStatusButtons();
 
-    // ✅ reflete na lista na hora
+    localStorage.setItem("chat_presence_status", myStatus);
+
+    if (window.ChatPresenceGlobal) {
+      window.ChatPresenceGlobal.setStatus(myStatus);
+      window.ChatPresenceGlobal.refresh().catch(() => {});
+    }
+
     await loadContacts();
   }
 
@@ -116,13 +156,9 @@ window.ChatUI = (() => {
     const badge = document.getElementById("chatUnreadBadge");
     if (!badge) return;
 
-    // ✅ opcional: se estiver monitorando, não apita (se quiser, remova essa linha)
-    // if (actorUserId) return;
-
     const data = await apiGet("/chat/unread_total/");
     const count = Number(data.count || 0);
 
-    // só apita se aumentou e não tem conversa aberta
     if (count > lastUnreadTotal && !currentOtherId) {
       playNewMessageSound();
     }
@@ -136,12 +172,14 @@ window.ChatUI = (() => {
       badge.style.display = "none";
       badge.textContent = "0";
     }
+
+    if (window.ChatNotificationsGlobal) {
+      window.ChatNotificationsGlobal.refreshUnread().catch(() => {});
+    }
   }
 
   async function markRead(otherId) {
     if (!otherId) return;
-
-    // ✅ modo monitor: não marca como lido no front (backend também já ignora)
     if (actorUserId) return;
 
     const fd = new FormData();
@@ -183,6 +221,7 @@ window.ChatUI = (() => {
   function setActiveContact(otherId) {
     const list = document.getElementById("chatUserList");
     if (!list) return;
+
     [...list.querySelectorAll(".list-group-item")].forEach((btn) => {
       const id = Number(btn.dataset.userId || 0);
       if (id && id === Number(otherId)) btn.classList.add("active");
@@ -197,22 +236,21 @@ window.ChatUI = (() => {
 
     canExport = !!data.can_export;
 
-    // ✅ status do ME
     if (data.my_status) {
       myStatus = data.my_status;
+      localStorage.setItem("chat_presence_status", myStatus);
       paintStatusButtons();
     }
 
-    // ✅ MONITOR
     const box = document.getElementById("chatMonitorBox");
     const sel = document.getElementById("chatMonitorSelect");
 
     if (data.can_monitor && box && sel) {
       box.style.display = "";
 
-      // options
       const current = String(actorUserId || "");
       sel.innerHTML = `<option value="">Minha visão</option>`;
+
       (data.monitor_users || []).forEach(u => {
         const opt = document.createElement("option");
         opt.value = String(u.id);
@@ -221,31 +259,27 @@ window.ChatUI = (() => {
         sel.appendChild(opt);
       });
 
-      // bind 1x
       if (!monitorBound) {
         monitorBound = true;
         sel.addEventListener("change", async () => {
           actorUserId = sel.value || "";
 
-          // fecha conversa atual quando troca o modo
           currentOtherId = null;
+
           const otherHidden = document.getElementById("chatOtherId");
           if (otherHidden) otherHidden.value = "";
 
-          // limpa mensagens
           const msgs = document.getElementById("chatMsgs");
           if (msgs) msgs.innerHTML = "";
 
-          // hint
           const hint = document.getElementById("chatHint");
-          if (hint) hint.textContent = actorUserId
-            ? `Monitorando usuário selecionado`
-            : "Selecione um contato.";
+          if (hint) {
+            hint.textContent = actorUserId
+              ? "Monitorando usuário selecionado"
+              : "Selecione um contato.";
+          }
 
-          // desliga UI de conversa enquanto não abrir contato
           enableConversationUI(false);
-
-          // recarrega contatos no novo contexto
           await loadContacts();
         });
       }
@@ -253,7 +287,6 @@ window.ChatUI = (() => {
       box.style.display = "none";
     }
 
-    // lista de contatos
     list.innerHTML = "";
     const items = sortContacts(data.items || []);
 
@@ -300,10 +333,8 @@ window.ChatUI = (() => {
     const otherHidden = document.getElementById("chatOtherId");
     if (otherHidden) otherHidden.value = otherId;
 
-    // ✅ habilita UI normalmente
     enableConversationUI(true);
 
-    // ✅ mas se estiver em modo monitor, vira leitura (desativa input/enviar)
     if (actorUserId) {
       enableConversationUI(false);
     }
@@ -345,6 +376,7 @@ window.ChatUI = (() => {
       }
 
       box.innerHTML = "";
+
       items.forEach((m) => {
         const wrap = document.createElement("div");
         wrap.className = `mb-2 d-flex ${m.is_me ? "justify-content-end" : "justify-content-start"}`;
@@ -382,6 +414,7 @@ window.ChatUI = (() => {
             lastMarkAt = now;
             await markRead(currentOtherId);
           }
+
           await loadContacts();
           return;
         }
@@ -389,6 +422,14 @@ window.ChatUI = (() => {
         if (lastMsg && !lastMsg.is_me && lastId !== lastSoundId) {
           lastSoundId = lastId;
           playNewMessageSound();
+
+          const pageHidden = document.hidden || document.visibilityState !== "visible";
+          if (pageHidden) {
+            showDesktopNotification(
+              "Nova mensagem no chat",
+              lastMsg.texto || "Você recebeu uma nova mensagem."
+            );
+          }
         }
 
         lastRenderedLastId = lastId;
@@ -407,7 +448,6 @@ window.ChatUI = (() => {
   }
 
   async function send() {
-    // ✅ modo monitor: bloqueia envio no front também
     if (actorUserId) {
       alert("Modo monitor: somente visualização.");
       return;
@@ -460,35 +500,42 @@ window.ChatUI = (() => {
     const imgIn = document.getElementById("chatImg");
     const exportBtn = document.getElementById("chatExportBtn");
 
-    if (sendBtn) sendBtn.addEventListener("click", (e) => {
-      e.preventDefault();
-      send();
-    });
+    if (sendBtn) {
+      sendBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        send();
+      });
+    }
 
-    if (exportBtn) exportBtn.addEventListener("click", (e) => {
-      e.preventDefault();
+    if (exportBtn) {
+      exportBtn.addEventListener("click", (e) => {
+        e.preventDefault();
 
-      const meId = document.getElementById("chatMeId")?.value;
-      if (!meId) return;
+        const meId = document.getElementById("chatMeId")?.value;
+        if (!meId) return;
 
-      // ✅ se estiver monitorando, exporta como o actor (alvo)
-      let u1 = actorUserId || meId;
-      let u2 = currentOtherId;
-      if (!u2) return;
+        let u1 = actorUserId || meId;
+        let u2 = currentOtherId;
+        if (!u2) return;
 
-      if (canExport) {
-        const ask = prompt(
-          "Exportar histórico.\n\nDigite dois usuários (ID ou username) separados por vírgula, ou deixe vazio para exportar a conversa atual.\nEx: hudson,gabriel"
-        );
-        if (ask && ask.includes(",")) {
-          const parts = ask.split(",").map(s => s.trim()).filter(Boolean);
-          if (parts.length >= 2) { u1 = parts[0]; u2 = parts[1]; }
+        if (canExport) {
+          const ask = prompt(
+            "Exportar histórico.\n\nDigite dois usuários (ID ou username) separados por vírgula, ou deixe vazio para exportar a conversa atual.\nEx: hudson,gabriel"
+          );
+
+          if (ask && ask.includes(",")) {
+            const parts = ask.split(",").map(s => s.trim()).filter(Boolean);
+            if (parts.length >= 2) {
+              u1 = parts[0];
+              u2 = parts[1];
+            }
+          }
         }
-      }
 
-      const url = `/chat/export/?u1=${encodeURIComponent(u1)}&u2=${encodeURIComponent(u2)}`;
-      window.open(url, "_blank");
-    });
+        const url = `/chat/export/?u1=${encodeURIComponent(u1)}&u2=${encodeURIComponent(u2)}`;
+        window.open(url, "_blank");
+      });
+    }
 
     if (input) {
       input.addEventListener("keydown", (e) => {
@@ -516,6 +563,7 @@ window.ChatUI = (() => {
   async function start() {
     bindUIOnce();
     unlockAudioOnce();
+    await ensureNotificationPermission().catch(() => {});
 
     enableConversationUI(false);
 
@@ -523,12 +571,13 @@ window.ChatUI = (() => {
     await loadContacts();
     await refreshUnreadBadge();
 
-    if (pingTimer) clearInterval(pingTimer);
-    pingTimer = setInterval(() => doPing().catch(() => {}), 30000);
+    if (!started) {
+      started = true;
 
-    setInterval(() => {
-      refreshUnreadBadge().catch(() => {});
-    }, 4000);
+      unreadTimer = setInterval(() => {
+        refreshUnreadBadge().catch(() => {});
+      }, 4000);
+    }
 
     paintStatusButtons();
   }

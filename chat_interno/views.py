@@ -6,9 +6,8 @@ from django.http import JsonResponse, HttpResponse
 from django.shortcuts import get_object_or_404
 from django.views.decorators.http import require_GET, require_POST
 from django.contrib.auth import get_user_model
+
 from .models import ChatPresence, ChatMonitorConfig
-
-
 from .services import (
     allowed_contacts,
     can_send_to,
@@ -23,6 +22,7 @@ from .services import (
 )
 
 User = get_user_model()
+
 
 def can_monitor_chat(user) -> bool:
     if not user or not user.is_authenticated:
@@ -57,7 +57,6 @@ def can_export_admin(user) -> bool:
         return False
     if user.is_superuser or user.is_staff:
         return True
-    # Coordenação
     return user.groups.filter(name="OPERACAO_CORDENACAO").exists()
 
 
@@ -72,6 +71,15 @@ def index(request):
 def ping(request):
     ping_user(request.user)
     return JsonResponse({"ok": True})
+
+
+@login_required
+@require_GET
+def my_status(request):
+    return JsonResponse({
+        "ok": True,
+        "status": effective_status(request.user),
+    })
 
 
 @login_required
@@ -99,9 +107,7 @@ def contacts(request):
     monitor_users = []
     if can_monitor_chat(me):
         monitor_users = list(
-            User.objects.all()
-            .order_by("username")
-            .values("id", "username")
+            User.objects.all().order_by("username").values("id", "username")
         )
 
     return JsonResponse({
@@ -182,6 +188,7 @@ def send_message(request, user_id: int):
         },
     })
 
+
 @login_required
 @require_POST
 def mark_read(request, user_id: int):
@@ -206,7 +213,6 @@ def export_history(request):
     if not can_export_admin(request.user):
         return JsonResponse({"error": "Sem permissão para exportar."}, status=403)
 
-    # admin passa ids OU usernames: ?u1=ID|username&u2=ID|username
     u1_raw = (request.GET.get("u1") or "").strip()
     u2_raw = (request.GET.get("u2") or "").strip()
     if not u1_raw or not u2_raw:
@@ -250,6 +256,10 @@ def set_status(request):
     presence, _ = ChatPresence.objects.get_or_create(user=request.user)
     presence.status = status
     presence.save()
+
+    # se usuário marcou online/ausente, já atualiza heartbeat na hora
+    if status in ["online", "ausente"]:
+        ping_user(request.user)
 
     return JsonResponse({
         "ok": True,

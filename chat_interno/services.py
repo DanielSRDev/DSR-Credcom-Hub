@@ -9,7 +9,7 @@ from .models import Conversation, Message, ChatVinculoOperador, ChatPresence
 
 User = get_user_model()
 
-ONLINE_TTL_SECONDS = 60
+ONLINE_TTL_SECONDS = 120
 
 # =========================
 # REGRAS DE CONTATO / ENVIO
