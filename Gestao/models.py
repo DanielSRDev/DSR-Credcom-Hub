@@ -89,14 +89,13 @@ class Tarefa(models.Model):
     # -----------------------
     @property
     def esta_atrasada(self):
-        # tudo que não está finalizado oficialmente pode atrasar
-        if self.status == self.Status.FEITA:
+        if self.status not in {self.Status.ABERTA, self.Status.EXECUTANDO}:
             return False
         return timezone.now() > self.prazo
 
     @property
     def vencendo(self):
-        if self.status == self.Status.FEITA:
+        if self.status not in {self.Status.ABERTA, self.Status.EXECUTANDO}:
             return False
         agora = timezone.now()
         return agora <= self.prazo <= (agora + timezone.timedelta(hours=6))

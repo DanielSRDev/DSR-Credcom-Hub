@@ -21,55 +21,34 @@ window.ChatUI = (() => {
   let suppressHistorySound = false;
   let myStatus = "offline";
 
+  let lastNotifiedMessageId = 0;
+  let notificationPermissionRequested = false;
+  const originalDocumentTitle = document.title || "Hub";
+
   const soundMsg = new Audio("/static/chat_interno/sounds/msg.mp3");
   soundMsg.volume = 0.6;
 
   function unlockAudioOnce() {
-    document.addEventListener("click", () => {
-      soundMsg.play().then(() => {
-        soundMsg.pause();
-        soundMsg.currentTime = 0;
-      }).catch(() => {});
-    }, { once: true });
+    document.addEventListener(
+      "click",
+      () => {
+        soundMsg
+          .play()
+          .then(() => {
+            soundMsg.pause();
+            soundMsg.currentTime = 0;
+          })
+          .catch(() => {});
+      },
+      { once: true }
+    );
   }
 
   function playNewMessageSound() {
     try {
       soundMsg.currentTime = 0;
       soundMsg.play().catch(() => {});
-    } catch {}
-  }
-
-  async function ensureNotificationPermission() {
-    if (!("Notification" in window)) return false;
-    if (Notification.permission === "granted") return true;
-    if (Notification.permission === "default") {
-      const result = await Notification.requestPermission();
-      return result === "granted";
-    }
-    return false;
-  }
-
-  function showDesktopNotification(title, body) {
-    if (!("Notification" in window)) return;
-    if (Notification.permission !== "granted") return;
-
-    try {
-      const n = new Notification(title, {
-        body: body || "Você recebeu uma nova mensagem.",
-        tag: currentOtherId ? `chat-conv-${currentOtherId}` : "chat-conv",
-        renotify: true,
-      });
-
-      n.onclick = function () {
-        window.focus();
-        n.close();
-      };
-
-      setTimeout(() => {
-        try { n.close(); } catch {}
-      }, 8000);
-    } catch {}
+    } catch (_) {}
   }
 
   function getCookie(name) {
@@ -93,8 +72,8 @@ window.ChatUI = (() => {
     const r = await fetch(withActor(url), {
       credentials: "same-origin",
       headers: {
-        "X-Requested-With": "XMLHttpRequest"
-      }
+        "X-Requested-With": "XMLHttpRequest",
+      },
     });
     return await r.json().catch(() => ({}));
   }
@@ -106,7 +85,7 @@ window.ChatUI = (() => {
       credentials: "same-origin",
       headers: {
         "X-CSRFToken": csrf(),
-        "X-Requested-With": "XMLHttpRequest"
+        "X-Requested-With": "XMLHttpRequest",
       },
     });
     return await r.json().catch(() => ({}));
@@ -117,11 +96,29 @@ window.ChatUI = (() => {
     await apiPost("/chat/ping/", fd);
   }
 
+  function escapeHtml(value) {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+
+  function formatDate(iso) {
+    try {
+      const d = new Date(iso);
+      return d.toLocaleString();
+    } catch (_) {
+      return iso;
+    }
+  }
+
   function paintStatusButtons() {
     const box = document.querySelector(".chat-status-box");
     if (!box) return;
 
-    box.querySelectorAll("button.status").forEach(btn => {
+    box.querySelectorAll("button.status").forEach((btn) => {
       const st = (btn.dataset.status || "").toLowerCase();
       if (st === myStatus) btn.classList.add("active");
       else btn.classList.remove("active");
@@ -206,7 +203,15 @@ window.ChatUI = (() => {
   }
 
   function enableConversationUI(on) {
-    const ids = ["chatInput", "chatSendBtn", "chatSearchMsg", "chatSearchBtn", "chatEmojiBtn", "chatImgBtn"];
+    const ids = [
+      "chatInput",
+      "chatSendBtn",
+      "chatSearchMsg",
+      "chatSearchBtn",
+      "chatEmojiBtn",
+      "chatImgBtn",
+    ];
+
     ids.forEach((id) => {
       const el = document.getElementById(id);
       if (el) el.disabled = !on;
@@ -227,6 +232,125 @@ window.ChatUI = (() => {
       if (id && id === Number(otherId)) btn.classList.add("active");
       else btn.classList.remove("active");
     });
+  }
+
+  function ensureToastContainer() {
+    let container = document.getElementById("chat-toast-container");
+    if (!container) {
+      container = document.createElement("div");
+      container.id = "chat-toast-container";
+      document.body.appendChild(container);
+    }
+    return container;
+  }
+
+  function showInternalToast(title, body, onClick = null) {
+    const container = ensureToastContainer();
+
+    const toast = document.createElement("div");
+    toast.className = "chat-toast";
+    toast.innerHTML = `
+      <div class="chat-toast-title">${escapeHtml(title)}</div>
+      <div class="chat-toast-body">${escapeHtml(body || "")}</div>
+    `;
+
+    if (typeof onClick === "function") {
+      toast.style.cursor = "pointer";
+      toast.addEventListener("click", () => {
+        onClick();
+        toast.remove();
+      });
+    }
+
+    container.appendChild(toast);
+
+    setTimeout(() => {
+      toast.classList.add("show");
+    }, 10);
+
+    setTimeout(() => {
+      toast.classList.remove("show");
+      setTimeout(() => toast.remove(), 250);
+    }, 5000);
+  }
+
+  async function requestBrowserNotificationPermissionOnce() {
+    if (!("Notification" in window)) return "unsupported";
+
+    if (Notification.permission === "granted") return "granted";
+    if (Notification.permission === "denied") return "denied";
+    if (notificationPermissionRequested) return Notification.permission;
+
+    notificationPermissionRequested = true;
+
+    try {
+      return await Notification.requestPermission();
+    } catch (err) {
+      console.warn("Falha ao solicitar permissão de notificação:", err);
+      return "default";
+    }
+  }
+
+  function showBrowserNotification(title, body, otherUserId = null) {
+    if (!("Notification" in window)) return false;
+    if (Notification.permission !== "granted") return false;
+
+    try {
+      const notification = new Notification(title, {
+        body: body || "Você recebeu uma nova mensagem.",
+        tag: otherUserId ? `chat-${otherUserId}` : "chat-message",
+        renotify: true,
+      });
+
+      notification.onclick = () => {
+        window.focus();
+        try {
+          notification.close();
+        } catch (_) {}
+
+        if (otherUserId) {
+          open(otherUserId);
+        }
+      };
+
+      setTimeout(() => {
+        try {
+          notification.close();
+        } catch (_) {}
+      }, 8000);
+
+      return true;
+    } catch (err) {
+      console.warn("Falha ao exibir notificação nativa:", err);
+      return false;
+    }
+  }
+
+  function flashDocumentTitle() {
+    try {
+      if (!document.hidden) return;
+
+      document.title = "(Nova mensagem) Hub";
+      setTimeout(() => {
+        document.title = originalDocumentTitle;
+      }, 4000);
+    } catch (_) {}
+  }
+
+  function notifyIncomingMessage({ messageId, senderName, text, otherUserId }) {
+    if (!messageId || messageId <= lastNotifiedMessageId) return;
+    lastNotifiedMessageId = messageId;
+
+    const title = `Nova mensagem de ${senderName || "Contato"}`;
+    const body = text || "Você recebeu uma nova mensagem no chat.";
+
+    showInternalToast(title, body, () => {
+      if (otherUserId) open(otherUserId);
+    });
+
+    playNewMessageSound();
+    // showBrowserNotification(title, body, otherUserId);
+    flashDocumentTitle();
   }
 
   async function loadContacts() {
@@ -251,7 +375,7 @@ window.ChatUI = (() => {
       const current = String(actorUserId || "");
       sel.innerHTML = `<option value="">Minha visão</option>`;
 
-      (data.monitor_users || []).forEach(u => {
+      (data.monitor_users || []).forEach((u) => {
         const opt = document.createElement("option");
         opt.value = String(u.id);
         opt.textContent = u.username;
@@ -263,7 +387,6 @@ window.ChatUI = (() => {
         monitorBound = true;
         sel.addEventListener("change", async () => {
           actorUserId = sel.value || "";
-
           currentOtherId = null;
 
           const otherHidden = document.getElementById("chatOtherId");
@@ -291,7 +414,8 @@ window.ChatUI = (() => {
     const items = sortContacts(data.items || []);
 
     if (items.length === 0) {
-      list.innerHTML = `<div class="text-secondary small">Nenhum contato disponível para você.</div>`;
+      list.innerHTML =
+        `<div class="text-secondary small">Nenhum contato disponível para você.</div>`;
       return;
     }
 
@@ -301,22 +425,28 @@ window.ChatUI = (() => {
       btn.className = "list-group-item list-group-item-action";
       btn.dataset.userId = u.id;
 
-      const nm = (u.nome || u.username);
+      const nm = u.nome || u.username;
       btn.onclick = () => open(u.id, nm);
 
       const statusTxt =
-        u.status === "online" ? "🟢 Online" :
-        (u.status === "ausente" ? "🟡 Ausente" : "⚪ Offline");
+        u.status === "online"
+          ? "🟢 Online"
+          : u.status === "ausente"
+            ? "🟡 Ausente"
+            : "⚪ Offline";
 
       btn.innerHTML = `
-        <div class="fw-semibold">${escapeHtml(u.nome || u.username)}</div>
+        <div class="fw-semibold">${escapeHtml(nm)}</div>
         <div class="small text-secondary">
           ${statusTxt}
           ${u.unread ? ` • <b>${u.unread}</b> nova(s)` : ""}
         </div>
       `;
 
-      if (Number(u.id) === Number(currentOtherId)) btn.classList.add("active");
+      if (Number(u.id) === Number(currentOtherId)) {
+        btn.classList.add("active");
+      }
+
       list.appendChild(btn);
     });
 
@@ -324,14 +454,14 @@ window.ChatUI = (() => {
   }
 
   async function open(otherId, otherName = null) {
-    currentOtherId = otherId;
+    currentOtherId = Number(otherId);
 
     suppressHistorySound = true;
     lastRenderedLastId = 0;
     lastSoundId = 0;
 
     const otherHidden = document.getElementById("chatOtherId");
-    if (otherHidden) otherHidden.value = otherId;
+    if (otherHidden) otherHidden.value = currentOtherId;
 
     enableConversationUI(true);
 
@@ -340,24 +470,31 @@ window.ChatUI = (() => {
     }
 
     const hint = document.getElementById("chatHint");
-    if (hint) hint.textContent = otherName ? `Conversa com: ${otherName}` : "Conversa aberta.";
+    if (hint) {
+      hint.textContent = otherName
+        ? `Conversa com: ${otherName}`
+        : "Conversa aberta.";
+    }
 
     const head = document.getElementById("chatConvHead");
     if (head) head.classList.add("active");
 
-    setActiveContact(otherId);
+    setActiveContact(currentOtherId);
 
     await doPing();
     await loadContacts();
     await loadHistory(true);
 
     if (pollTimer) clearInterval(pollTimer);
-    pollTimer = setInterval(() => loadHistory(false), 4000);
+    pollTimer = setInterval(() => {
+      loadHistory(false).catch(() => {});
+    }, 4000);
   }
 
   async function loadHistory(forceScroll) {
     if (!currentOtherId) return;
     if (historyLoading) return;
+
     historyLoading = true;
 
     try {
@@ -369,7 +506,7 @@ window.ChatUI = (() => {
 
       const items = data.items || [];
       const lastMsg = items.length ? items[items.length - 1] : null;
-      const lastId = lastMsg ? Number(lastMsg.id) : 0;
+      const lastId = lastMsg ? Number(lastMsg.id || 0) : 0;
 
       if (lastId && lastId === lastRenderedLastId && !forceScroll) {
         return;
@@ -401,7 +538,9 @@ window.ChatUI = (() => {
         box.appendChild(wrap);
       });
 
-      if (forceScroll) box.scrollTop = box.scrollHeight;
+      if (forceScroll) {
+        box.scrollTop = box.scrollHeight;
+      }
 
       if (lastId && lastId !== lastRenderedLastId) {
         if (suppressHistorySound) {
@@ -421,15 +560,13 @@ window.ChatUI = (() => {
 
         if (lastMsg && !lastMsg.is_me && lastId !== lastSoundId) {
           lastSoundId = lastId;
-          playNewMessageSound();
 
-          const pageHidden = document.hidden || document.visibilityState !== "visible";
-          if (pageHidden) {
-            showDesktopNotification(
-              "Nova mensagem no chat",
-              lastMsg.texto || "Você recebeu uma nova mensagem."
-            );
-          }
+          notifyIncomingMessage({
+            messageId: lastId,
+            senderName: "Contato",
+            text: lastMsg.texto || "Você recebeu uma nova mensagem.",
+            otherUserId: currentOtherId,
+          });
         }
 
         lastRenderedLastId = lastId;
@@ -462,7 +599,10 @@ window.ChatUI = (() => {
       if (!input) return;
 
       const texto = (input.value || "").trim();
-      const otherId = currentOtherId || Number(document.getElementById("chatOtherId")?.value || 0);
+      const otherId =
+        currentOtherId ||
+        Number(document.getElementById("chatOtherId")?.value || 0);
+
       if (!otherId) return;
 
       const hasImage = file && file.files && file.files.length > 0;
@@ -475,7 +615,7 @@ window.ChatUI = (() => {
       if (hasImage) fd.append("imagem", file.files[0]);
 
       const data = await apiPost(`/chat/send/${otherId}/`, fd);
-      if (data.error) {
+      if (data?.error) {
         alert(data.error);
         return;
       }
@@ -524,7 +664,11 @@ window.ChatUI = (() => {
           );
 
           if (ask && ask.includes(",")) {
-            const parts = ask.split(",").map(s => s.trim()).filter(Boolean);
+            const parts = ask
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean);
+
             if (parts.length >= 2) {
               u1 = parts[0];
               u2 = parts[1];
@@ -563,7 +707,7 @@ window.ChatUI = (() => {
   async function start() {
     bindUIOnce();
     unlockAudioOnce();
-    await ensureNotificationPermission().catch(() => {});
+    await requestBrowserNotificationPermissionOnce().catch(() => {});
 
     enableConversationUI(false);
 
@@ -582,23 +726,10 @@ window.ChatUI = (() => {
     paintStatusButtons();
   }
 
-  function escapeHtml(s) {
-    return String(s)
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;")
-      .replaceAll("'", "&#039;");
-  }
-
-  function formatDate(iso) {
-    try {
-      const d = new Date(iso);
-      return d.toLocaleString();
-    } catch {
-      return iso;
-    }
-  }
-
-  return { start, open, send, setStatus };
+  return {
+    start,
+    open,
+    send,
+    setStatus,
+  };
 })();

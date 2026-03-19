@@ -82,11 +82,13 @@ class Tarefa(models.Model):
 
     @property
     def esta_atrasada(self) -> bool:
-        return self.status != self.Status.FEITA and timezone.now() > self.prazo
+        if self.status not in {self.Status.ABERTA, self.Status.EXECUTANDO}:
+            return False
+        return timezone.now() > self.prazo
 
     @property
     def vencendo(self) -> bool:
-        if self.status == self.Status.FEITA:
+        if self.status not in {self.Status.ABERTA, self.Status.EXECUTANDO}:
             return False
         delta = self.prazo - timezone.now()
         return 0 < delta.total_seconds() <= 24 * 3600

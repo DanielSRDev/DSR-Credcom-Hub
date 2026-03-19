@@ -543,8 +543,18 @@ def partial_kpis(request):
     finalizadas = base.filter(status="feita").count()
 
     agora = timezone.now()
-    atrasadas = base.exclude(status="feita").filter(prazo__lt=agora).count()
-    vencendo = base.exclude(status="feita").filter(prazo__gte=agora, prazo__lte=agora + timedelta(hours=24)).count()
+    status_pendentes = [Tarefa.Status.ABERTA, Tarefa.Status.EXECUTANDO]
+
+    atrasadas = base.filter(
+        status__in=status_pendentes,
+        prazo__lt=agora
+    ).count()
+
+    vencendo = base.filter(
+        status__in=status_pendentes,
+        prazo__gte=agora,
+        prazo__lte=agora + timedelta(hours=24)
+    ).count()
 
     return render(request, "Gestao/partials/kpis.html", {
         "abertas": abertas,
