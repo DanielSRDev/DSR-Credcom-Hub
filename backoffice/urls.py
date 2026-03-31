@@ -16,6 +16,7 @@ urlpatterns = [
     path("operacao/", include("operacao.urls")),
     # CHAT (com namespace certo)
     path("chat/", include(("chat_interno.urls", "chat_interno"), namespace="chat_interno")),
+    path("zapmsg/", include("zapmsg.urls")),
 
 ] + static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
 

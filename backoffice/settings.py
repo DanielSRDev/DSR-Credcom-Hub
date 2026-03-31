@@ -46,6 +46,7 @@ INSTALLED_APPS = [
     "operacao",
     "core",
     "chat_interno",
+    'zapmsg',
 ]
 
 MIDDLEWARE = [
@@ -165,3 +166,6 @@ SESSION_COOKIE_AGE = 1800
 
 # renova a sessão a cada request
 SESSION_SAVE_EVERY_REQUEST = True
+
+ZAPMSG_CONNECTOR_URL = os.getenv("ZAPMSG_CONNECTOR_URL", "http://127.0.0.1:3010")
+ZAPMSG_WEBHOOK_TOKEN = os.getenv("ZAPMSG_WEBHOOK_TOKEN", "dsr_zapmsg_2026")

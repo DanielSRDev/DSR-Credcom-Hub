@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}ZapMsg{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'zapmsg/css/dashboard.css' %}">
+{% endblock %}
+
+{% block container_class %}container-fluid p-0{% endblock %}
+
+{% block content %}
+<div
+    class="zap-page"
+    data-current-target-id="{{ target_user.id }}"
+    data-current-target-username="{{ target_user.username }}"
+>
+    <div class="zap-shell">
+
+        <aside class="zap-sidebar">
+            <div class="zap-sidebar-top">
+                <div class="w-100">
+                    <h4 class="zap-title mb-1">ZapMsg</h4>
+
+                    <div class="zap-account-line">
+                        <span class="zap-user" id="viewer-user-label">{{ request.user.username }}</span>
+                        <span id="status-badge" class="zap-status-badge">Carregando...</span>
+                    </div>
+
+                    <div class="mt-1 small text-muted">
+                        Conta ativa: <strong id="target-user-label">{{ target_user.username }}</strong>
+                    </div>
+
+                    {% if monitor_targets|length > 1 %}
+                    <div class="mt-2">
+                        <label for="monitor-target" class="form-label mb-1 small text-muted">Conta monitorada</label>
+                        <select id="monitor-target" class="form-select form-select-sm" onchange="window.ZapMsgUI.changeTarget(this.value)">
+                            {% for item in monitor_targets %}
+                                <option value="{{ item.id }}" {% if item.id == target_user.id %}selected{% endif %}>
+                                    {{ item.label }} (@{{ item.username }})
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    {% endif %}
+                </div>
+
+                <div class="zap-sidebar-actions">
+                    <button id="btn-connect" class="btn btn-sm btn-primary" type="button">Conectar</button>
+                    <button id="btn-disconnect" class="btn btn-sm btn-outline-danger d-none" type="button">Desconectar</button>
+                </div>
+            </div>
+
+            <div id="zap-qr-panel" class="zap-qr-panel d-none">
+                <div class="zap-qr-title">Escaneie o QR Code</div>
+                <div id="qr-container" class="zap-qr-box">
+                    <p class="text-muted mb-0">Nenhum QR disponível.</p>
+                </div>
+            </div>
+
+            <div class="zap-search-wrap">
+                <div class="zap-search-actions">
+                    <input type="text" id="busca-conversa" class="form-control" placeholder="Buscar conversa...">
+                    <button id="btn-nova-conversa" class="btn btn-success" type="button">+ Nova</button>
+                </div>
+            </div>
+
+            <div id="lista-conversas" class="zap-conversation-list"></div>
+        </aside>
+
+        <section class="zap-main">
+            <header id="chat-header" class="zap-chat-header">
+                <div class="zap-chat-avatar" id="chat-avatar">?</div>
+
+                <div class="zap-chat-meta">
+                    <div class="zap-chat-name" id="chat-nome">Selecione uma conversa</div>
+                    <div class="zap-chat-number" id="chat-numero">Nenhuma conversa aberta</div>
+                </div>
+
+                <div class="zap-chat-actions">
+                    <button id="btn-excluir-conversa" class="btn btn-sm btn-outline-danger d-none" type="button">
+                        Excluir conversa
+                    </button>
+                </div>
+            </header>
+
+            <div id="mensagens-box">
+                <div class="zap-empty-state">
+                    <h5>Seu WhatsApp dentro do sistema</h5>
+                    <p>Escolha uma conversa na lateral para começar.</p>
+                </div>
+            </div>
+
+            <form id="form-envio" class="zap-input-bar" enctype="multipart/form-data">
+                {% csrf_token %}
+
+                <input type="file" id="input-arquivo" class="d-none"
+                       accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip">
+                <input type="file" id="input-audio" class="d-none" accept="audio/*">
+
+                <button type="button" id="btn-anexo" class="btn btn-light zap-action-btn" title="Enviar arquivo">📎</button>
+                <button type="button" id="btn-audio" class="btn btn-light zap-action-btn" title="Gravar áudio">🎤</button>
+
+                <input
+                    type="text"
+                    id="input-mensagem"
+                    class="form-control"
+                    placeholder="Digite uma mensagem..."
+                    autocomplete="off"
+                    disabled
+                >
+
+                <button type="submit" id="btn-enviar" class="btn btn-success zap-send-btn" disabled>Enviar</button>
+            </form>
+        </section>
+    </div>
+</div>
+
+<div class="modal fade" id="novaConversaModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <form id="form-nova-conversa">
+                <div class="modal-header">
+                    <h5 class="modal-title">Nova conversa</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+                </div>
+
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Número</label>
+                        <input type="text" class="form-control" id="nova-conversa-numero" placeholder="Ex.: 64999999999" required>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Nome (opcional)</label>
+                        <input type="text" class="form-control" id="nova-conversa-nome" placeholder="Nome do contato">
+                    </div>
+
+                    <small class="text-muted">Digite com DDD. Pode ser com ou sem +55.</small>
+                </div>
+
+                <div class="modal-footer">
+                    <button type="submit" class="btn btn-success">Criar conversa</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'zapmsg/js/dashboard.js' %}"></script>
+{% endblock %}

@@ -32,6 +32,19 @@
       </div>
       {% endif %}
 
+
+      {% if pode_ver_operacao %}
+      <div class="col-md-4">
+        <div class="card shadow-sm h-100">
+          <div class="card-body">
+            <h5 class="card-title">💬 ZapMsg</h5>
+            <p class="card-text">Conexão individual de WhatsApp por usuário.</p>
+            <a href="{% url 'zapmsg:dashboard' %}" class="btn btn-primary">Entrar no ZapMsg</a>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
       {% if pode_ver_nibo %}
       <div class="col-md-6 col-lg-4">
         <div class="card shadow-sm h-100" style="border-radius:16px;">

@@ -58,16 +58,20 @@ def queryset_visivel_para(user):
     """
     Coordenação: vê tudo.
     Supervisor: vê tarefas atribuídas aos membros da equipe dele (e ele mesmo).
-    Operador: vê somente tarefas atribuídas a ele.
+    Operador: vê tarefas atribuídas a ele e também as que ele criou.
     """
     if is_coord(user):
         return Tarefa.objects.all()
 
     if is_supervisor(user):
         membros = membros_da_equipe_do_supervisor(user)
-        return Tarefa.objects.filter(Q(atribuida_para__in=membros) | Q(atribuida_para=user)).distinct()
+        return Tarefa.objects.filter(
+            Q(atribuida_para__in=membros) | Q(atribuida_para=user)
+        ).distinct()
 
-    return Tarefa.objects.filter(atribuida_para=user)
+    return Tarefa.objects.filter(
+        Q(atribuida_para=user) | Q(criada_por=user)
+    ).distinct()
 
 
 def pode_mexer_tarefa(user, tarefa: Tarefa) -> bool:
@@ -117,7 +121,7 @@ def quadro(request):
 
     # operador não escolhe "Responsável"
     if is_operador(request.user):
-        user_id = str(request.user.id)
+        user_id = ""
 
     if user_id:
         try:
@@ -175,7 +179,7 @@ def quadro(request):
         "f_data_fim": data_fim,
         "f_user": user_id,
         "final": final,
-        "pode_criar": is_coord(request.user) or is_supervisor(request.user),
+        "pode_criar": is_coord(request.user) or is_supervisor(request.user) or is_operador(request.user),
         "pode_editar": is_coord(request.user) or is_supervisor(request.user),
         "pode_deletar": is_coord(request.user) or is_supervisor(request.user),
         "pode_prioridade": is_coord(request.user) or is_supervisor(request.user),
@@ -190,10 +194,10 @@ def quadro(request):
 # CRUD
 # ============================================================
 
-@user_in_groups("OPERACAO_SUPERVISOR", "OPERACAO_CORDENACAO")
+@user_in_groups("OPERACAO", "OPERACAO_SUPERVISOR", "OPERACAO_CORDENACAO")
 @login_required
 def tarefa_criar(request):
-    if not (is_coord(request.user) or is_supervisor(request.user)):
+    if not (is_coord(request.user) or is_supervisor(request.user) or is_operador(request.user)):
         return HttpResponseForbidden("Sem permissão para criar.")
 
     if request.method == "POST":
