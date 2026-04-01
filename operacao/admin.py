@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Equipe, Tarefa, Comentario, Anexo
+from .models import Equipe, Tarefa, Comentario, Anexo, OperacaoPermissaoUsuario
 
 
 @admin.register(Equipe)
@@ -39,6 +39,11 @@ class TarefaAdmin(admin.ModelAdmin):
         for obj in queryset:
             obj.soft_delete(request.user)
 
-
+@admin.register(OperacaoPermissaoUsuario)
+class OperacaoPermissaoUsuarioAdmin(admin.ModelAdmin):
+    list_display = ("user", "pode_criar_chamado_supervisor")
+    search_fields = ("user__username", "user__first_name", "user__last_name")
+    list_filter = ("pode_criar_chamado_supervisor",)
+    
 admin.site.register(Comentario)
 admin.site.register(Anexo)

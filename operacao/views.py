@@ -13,7 +13,7 @@ from django.views.decorators.http import require_POST, require_GET
 
 from core.decorators import user_in_groups
 from .forms import TarefaForm, ComentarioForm, AnexoForm
-from .models import Tarefa, Equipe, Comentario, Anexo
+from .models import Tarefa, Equipe, Comentario, Anexo, OperacaoPermissaoUsuario
 
 
 # ============================================================
@@ -179,7 +179,7 @@ def quadro(request):
         "f_data_fim": data_fim,
         "f_user": user_id,
         "final": final,
-        "pode_criar": is_coord(request.user) or is_supervisor(request.user) or is_operador(request.user),
+        "pode_criar": operador_pode_criar(request.user),
         "pode_editar": is_coord(request.user) or is_supervisor(request.user),
         "pode_deletar": is_coord(request.user) or is_supervisor(request.user),
         "pode_prioridade": is_coord(request.user) or is_supervisor(request.user),
@@ -197,7 +197,7 @@ def quadro(request):
 @user_in_groups("OPERACAO", "OPERACAO_SUPERVISOR", "OPERACAO_CORDENACAO")
 @login_required
 def tarefa_criar(request):
-    if not (is_coord(request.user) or is_supervisor(request.user) or is_operador(request.user)):
+    if not operador_pode_criar(request.user):
         return HttpResponseForbidden("Sem permissão para criar.")
 
     if request.method == "POST":
@@ -485,3 +485,23 @@ def partial_kpis(request):
         "vencendo": vencendo,
         "now": timezone.now(),
     })
+
+
+def operador_pode_criar(user):
+    """
+    Regra:
+    - coordenação: sim
+    - supervisor: sim
+    - operador: sim por padrão, exceto se houver bloqueio individual
+    """
+    if is_coord(user) or is_supervisor(user):
+        return True
+
+    if not is_operador(user):
+        return False
+
+    permissao = getattr(user, "operacao_permissao", None)
+    if permissao is None:
+        return True
+
+    return permissao.pode_criar_chamado_supervisor

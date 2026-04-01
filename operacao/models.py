@@ -162,5 +162,26 @@ class Anexo(models.Model):
 
     def __str__(self):
         return f"Anexo {self.id} - Tarefa {self.tarefa_id}"
+    
+
+class OperacaoPermissaoUsuario(models.Model):
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="operacao_permissao",
+        verbose_name="Usuário",
+    )
+    pode_criar_chamado_supervisor = models.BooleanField(
+        default=True,
+        verbose_name="Pode criar chamado para o supervisor",
+    )
+
+    class Meta:
+        verbose_name = "Permissão de usuário (Operação)"
+        verbose_name_plural = "Permissões de usuários (Operação)"
+
+    def __str__(self):
+        status = "SIM" if self.pode_criar_chamado_supervisor else "NÃO"
+        return f"{self.user.username} - criar chamado: {status}"
 
 
