@@ -47,6 +47,7 @@ INSTALLED_APPS = [
     "core",
     "chat_interno",
     'zapmsg',
+    'painel_operacao',
 ]
 
 MIDDLEWARE = [
@@ -96,7 +97,19 @@ DATABASES = {
         "PASSWORD": "@Project123#",
         "HOST": "localhost",
         "PORT": "5432",
-    }
+    },
+    "cliente_db": {
+        "ENGINE": "mssql",
+        "NAME": "credcom",
+        "USER": "credcom",
+        "PASSWORD": "wUTZZpWnjlxfxidDe8Av",
+        "HOST": "cobmais-stage.database.windows.net",
+        "PORT": "1433",
+        "OPTIONS": {
+            "driver": "ODBC Driver 18 for SQL Server",
+            "extra_params": "Encrypt=yes;TrustServerCertificate=no;Connection Timeout=30;",
+        },
+    },
 }
 
 

@@ -1,0 +1,195 @@
+{% extends "base.html" %}
+{% load static %}
+{% load painel_operacao_extras %}
+
+{% block title %}Painel Operação{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'painel_operacao/css/painel_operacao.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="painel-operacao-wrap">
+
+    <div class="painel-topo">
+        <div>
+            <h2 class="painel-titulo">Painel Operação</h2>
+            <p class="painel-subtitulo">Resumo de Emissao, Pago, Avencer e Quebra</p>
+        </div>
+
+        <div class="painel-acoes-topo">
+            <a href="{% url 'painel_operacao:config' %}" class="btn btn-outline-secondary">
+                Configuração
+            </a>
+        </div>
+    </div>
+
+    {% if messages %}
+        <div class="mb-3">
+            {% for message in messages %}
+                <div class="alert alert-{{ message.tags|default:'info' }} mb-2">
+                    {{ message }}
+                </div>
+            {% endfor %}
+        </div>
+    {% endif %}
+
+    <div class="painel-filtros-card">
+        <form method="get" class="row g-3">
+            <div class="col-md-2">
+                <label class="form-label">Data inicial</label>
+                {{ form.data_ini }}
+            </div>
+
+            <div class="col-md-2">
+                <label class="form-label">Data final</label>
+                {{ form.data_fim }}
+            </div>
+
+            <div class="col-md-3">
+                <label class="form-label">Supervisor</label>
+                {{ form.supervisor }}
+            </div>
+
+            <div class="col-md-3">
+                <label class="form-label">Operador</label>
+                {{ form.operador }}
+            </div>
+
+            <div class="col-md-2">
+                <label class="form-label">Carteira</label>
+                {{ form.credor }}
+            </div>
+
+            <div class="col-12 d-flex gap-2 flex-wrap">
+                <button type="submit" class="btn btn-primary">Filtrar</button>
+                <a href="{% url 'painel_operacao:painel' %}" class="btn btn-outline-secondary">Limpar</a>
+            </div>
+        </form>
+
+        <form method="post" action="{% url 'painel_operacao:atualizar' %}" class="mt-3 d-flex gap-2 flex-wrap">
+            {% csrf_token %}
+            <input type="hidden" name="data_ini" value="{{ form.data_ini.value|default:'' }}">
+            <input type="hidden" name="data_fim" value="{{ form.data_fim.value|default:'' }}">
+            <button type="submit" class="btn btn-success">Atualizar dados</button>
+        </form>
+    </div>
+
+    <div class="kpis-grid">
+        <div class="kpi-card kpi-emissao">
+            <span class="kpi-label">Emissao</span>
+            <strong class="kpi-valor">{{ total_emissao|brl }}</strong>
+        </div>
+
+        <div class="kpi-card kpi-pago">
+            <span class="kpi-label">Pago</span>
+            <strong class="kpi-valor">{{ total_pago|brl }}</strong>
+        </div>
+
+        <div class="kpi-card kpi-avencer">
+            <span class="kpi-label">Avencer</span>
+            <strong class="kpi-valor">{{ total_avencer|brl }}</strong>
+        </div>
+
+        <div class="kpi-card kpi-quebra">
+            <span class="kpi-label">Quebra</span>
+            <strong class="kpi-valor">{{ total_quebra|brl }}</strong>
+        </div>
+    </div>
+
+    <div class="painel-grid-principal">
+        <div class="supervisores-card">
+            <div class="bloco-titulo">SUPERVISORES</div>
+
+            {% for item in resumo_supervisores %}
+                <div class="supervisor-box">
+                    <div class="supervisor-nome">{{ item.nome }}</div>
+
+                    <div class="supervisor-dados">
+                        <div><strong>Emissao:</strong> <span>{{ item.emissao|brl }}</span></div>
+                        <div><strong>Pago:</strong> <span class="texto-pago">{{ item.pago|brl }}</span></div>
+                        <div><strong>Avencer:</strong> <span class="texto-avencer">{{ item.avencer|brl }}</span></div>
+                        <div><strong>Quebra:</strong> <span class="texto-quebra">{{ item.quebra|brl }}</span></div>
+                    </div>
+                </div>
+            {% empty %}
+                <div class="supervisor-box">
+                    <div class="supervisor-nome">Sem supervisores</div>
+                    <div class="supervisor-dados">
+                        <div>Nenhum supervisor cadastrado.</div>
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+
+        <div class="operadores-card">
+            <div class="bloco-titulo">OPERADORES</div>
+
+            {% for item in ranking_operadores %}
+                <div class="operador-linha {{ item.faixa_classe }} {% if item.topo %}operador-top1{% endif %}">
+                    <div class="operador-rank">#{{ item.posicao }}</div>
+
+                    <div class="operador-info">
+                        <div class="operador-nome">{{ item.emitido_por_nome }}</div>
+                        <div class="operador-supervisor">{{ item.supervisor_nome }}</div>
+                    </div>
+
+                    <div class="operador-valor">
+                        {{ item.emissao|brl }}
+                    </div>
+                </div>
+            {% empty %}
+                <div class="operador-linha faixa-vermelha">
+                    <div class="operador-rank">#0</div>
+                    <div class="operador-info">
+                        <div class="operador-nome">Sem operadores</div>
+                        <div class="operador-supervisor">Nenhum dado encontrado</div>
+                    </div>
+                    <div class="operador-valor">{{ 0|brl }}</div>
+                </div>
+            {% endfor %}
+        </div>
+
+        <div class="resumo-card">
+            <div class="resumo-topo">CREDCOM</div>
+
+            <div class="resumo-logo-box">
+                <div class="empresa-nome">CREDCOM</div>
+                <div class="empresa-subtitulo">Painel de Emissão Operacional</div>
+            </div>
+
+            <div class="resumo-box resumo-emissao">
+                <div class="resumo-label">Emissao total Dia</div>
+                <div class="resumo-valor">{{ total_emissao|brl }}</div>
+            </div>
+
+            <div class="resumo-box resumo-meta">
+                <div class="resumo-label">META DIARIA</div>
+                <div class="resumo-valor">{{ meta_diaria_geral|brl }}</div>
+            </div>
+
+            <div class="resumo-box resumo-falta">
+                <div class="resumo-label">FALTA META DIARIA</div>
+                <div class="resumo-valor">{{ meta_diaria_restante|brl }}</div>
+            </div>
+
+            <div class="resumo-box resumo-mensal">
+                <div class="resumo-label">META GERAL DO MÊS</div>
+                <div class="resumo-valor">{{ meta_mensal_geral|brl }}</div>
+            </div>
+
+            <div class="resumo-box resumo-box-menor">
+                <div class="resumo-label">Última atualização</div>
+                <div class="resumo-valor-menor">
+                    {% if config and config.ultima_atualizacao %}
+                        {{ config.ultima_atualizacao|date:"d/m/Y H:i" }}
+                    {% else %}
+                        Não atualizada
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+{% endblock %}
