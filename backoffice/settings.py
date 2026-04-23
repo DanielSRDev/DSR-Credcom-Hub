@@ -47,7 +47,7 @@ INSTALLED_APPS = [
     "core",
     "chat_interno",
     'zapmsg',
-    'painel_operacao',
+    "painel_operacao",
 ]
 
 MIDDLEWARE = [
@@ -182,3 +182,4 @@ SESSION_SAVE_EVERY_REQUEST = True
 
 ZAPMSG_CONNECTOR_URL = os.getenv("ZAPMSG_CONNECTOR_URL", "http://127.0.0.1:3010")
 ZAPMSG_WEBHOOK_TOKEN = os.getenv("ZAPMSG_WEBHOOK_TOKEN", "dsr_zapmsg_2026")
+

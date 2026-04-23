@@ -5,6 +5,7 @@ from .models import (
     OperadorAlias,
     PainelConfiguracao,
     PainelSyncLog,
+    PainelOperacaoPagamento,
     PainelOperacaoRegistro,
 )
 
@@ -52,6 +53,15 @@ class PainelSyncLogAdmin(admin.ModelAdmin):
     readonly_fields = ("iniciado_em", "finalizado_em", "sucesso", "total_registros", "mensagem")
 
 
+@admin.register(PainelOperacaoPagamento)
+class PainelOperacaoPagamentoAdmin(admin.ModelAdmin):
+    list_display = ("pgo_id", "aco_id", "pgo_data", "pgo_valor", "pct_id", "fpg_id")
+    list_filter = ("fpg_id", "pgo_parcial")
+    search_fields = ("pgo_id", "aco_id", "pct_id")
+    readonly_fields = [field.name for field in PainelOperacaoPagamento._meta.fields]
+    ordering = ("-pgo_data",)
+
+
 @admin.register(PainelOperacaoRegistro)
 class PainelOperacaoRegistroAdmin(admin.ModelAdmin):
     list_display = (
@@ -60,13 +70,14 @@ class PainelOperacaoRegistroAdmin(admin.ModelAdmin):
         "credor",
         "emitido_por_nome",
         "supervisor_nome",
+        "tem_pagamento",
         "valor_emissao",
         "valor_pago",
         "valor_avencer",
         "valor_quebra",
         "data_emissao",
     )
-    list_filter = ("credor", "supervisor_nome", "emitido_por_nome", "status_acordo")
-    search_fields = ("numero_acordo", "cliente", "cpf_cnpj", "contrato", "emitido_por_login", "emitido_por_nome")
+    list_filter = ("credor", "supervisor_nome", "emitido_por_nome", "status_acordo", "tem_pagamento")
+    search_fields = ("numero_acordo", "cliente", "cpf_cnpj", "contrato", "emitido_por_login", "emitido_por_nome", "aco_id")
     readonly_fields = [field.name for field in PainelOperacaoRegistro._meta.fields]
     ordering = ("-data_emissao",)

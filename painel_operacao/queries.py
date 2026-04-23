@@ -160,3 +160,20 @@ GROUP BY
     ev.ope_login
 ORDER BY ev.evc_data DESC
 """
+
+SQL_PAGAMENTOS_ACORDO = """
+SELECT
+    p.pgo_id,
+    p.pgo_data,
+    p.pgo_valor,
+    p.aco_id,
+    p.pct_id,
+    p.fpg_id,
+    p.pgo_parcial,
+    p.pgo_etl_alteracao
+FROM dbo.tb_pagamento p
+WHERE p.pgo_data >= %s
+  AND p.pgo_data < DATEADD(DAY, 1, %s)
+  AND p.aco_id IS NOT NULL
+ORDER BY p.pgo_data DESC, p.pgo_id DESC
+"""

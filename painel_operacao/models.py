@@ -92,6 +92,31 @@ class PainelSyncLog(models.Model):
         return f"Sync {self.iniciado_em:%d/%m/%Y %H:%M}"
 
 
+class PainelOperacaoPagamento(models.Model):
+    pgo_id = models.BigIntegerField("Pagamento ID", unique=True, db_index=True)
+    aco_id = models.BigIntegerField("Acordo ID", db_index=True)
+    pct_id = models.BigIntegerField("PCT ID", null=True, blank=True, db_index=True)
+    pgo_data = models.DateTimeField("Data pagamento", null=True, blank=True)
+    pgo_valor = models.DecimalField("Valor pagamento", max_digits=14, decimal_places=2, default=0)
+    fpg_id = models.IntegerField("Forma pagamento ID", null=True, blank=True)
+    pgo_parcial = models.BooleanField("Pagamento parcial", default=False)
+    pgo_etl_alteracao = models.DateTimeField("ETL alteração", null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Pagamento do Painel Operação"
+        verbose_name_plural = "Pagamentos do Painel Operação"
+        ordering = ["-pgo_data", "-pgo_id"]
+        indexes = [
+            models.Index(fields=["aco_id"]),
+            models.Index(fields=["pgo_data"]),
+        ]
+
+    def __str__(self):
+        return f"{self.pgo_id} -> {self.aco_id}"
+
+
 class PainelOperacaoRegistro(models.Model):
     data_referencia = models.DateField("Data de referência", null=True, blank=True)
     data_acordo = models.DateTimeField("Data do acordo", null=True, blank=True)
@@ -141,6 +166,8 @@ class PainelOperacaoRegistro(models.Model):
     emitido_por_nome = models.CharField("Emitido por nome", max_length=255, blank=True, default="", db_index=True)
     supervisor_nome = models.CharField("Supervisor", max_length=150, blank=True, default="", db_index=True)
 
+    tem_pagamento = models.BooleanField("Tem pagamento", default=False)
+
     valor_emissao = models.DecimalField("Emissao", max_digits=14, decimal_places=2, default=0)
     valor_pago = models.DecimalField("Pago", max_digits=14, decimal_places=2, default=0)
     valor_avencer = models.DecimalField("Avencer", max_digits=14, decimal_places=2, default=0)
@@ -157,6 +184,7 @@ class PainelOperacaoRegistro(models.Model):
             models.Index(fields=["credor"]),
             models.Index(fields=["supervisor_nome"]),
             models.Index(fields=["emitido_por_nome"]),
+            models.Index(fields=["aco_id"]),
         ]
 
     def __str__(self):

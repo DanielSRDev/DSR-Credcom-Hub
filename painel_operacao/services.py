@@ -8,10 +8,11 @@ from .models import (
     OperadorAlias,
     CarteiraSupervisor,
     PainelConfiguracao,
+    PainelOperacaoPagamento,
     PainelOperacaoRegistro,
     PainelSyncLog,
 )
-from .queries import SQL_PAINEL_OPERACAO
+from .queries import SQL_PAGAMENTOS_ACORDO, SQL_PAINEL_OPERACAO
 
 
 def decimal_or_zero(value):
@@ -20,7 +21,7 @@ def decimal_or_zero(value):
     return Decimal(str(value))
 
 
-def normalizar_cre_id(valor):
+def normalizar_bigint(valor):
     if valor is None or valor == "":
         return None
     try:
@@ -52,128 +53,150 @@ def buscar_mapa_supervisores():
     )
 
     for item in queryset:
-        cre_id_normalizado = normalizar_cre_id(item.cre_id)
+        cre_id_normalizado = normalizar_bigint(item.cre_id)
         if cre_id_normalizado is not None:
             mapa[cre_id_normalizado] = item.supervisor.nome
 
     return mapa
 
 
-def executar_query_stage(data_ini, data_fim):
-    with connections["cliente_db"].cursor() as cursor:
-        cursor.execute(SQL_PAINEL_OPERACAO, [data_ini, data_fim])
+def executar_query(query, data_ini, data_fim, alias="cliente_db"):
+    with connections[alias].cursor() as cursor:
+        cursor.execute(query, [data_ini, data_fim])
         colunas = [col[0] for col in cursor.description]
         resultados = cursor.fetchall()
 
     registros = []
     for linha in resultados:
         registros.append(dict(zip(colunas, linha)))
-
     return registros
 
 
-def classificar_status(status_acordo, honorario_liquido):
-    status = (status_acordo or "").strip().lower()
+def criar_pagamentos_locais(registros_pagamento):
+    pagamentos = []
 
+    for item in registros_pagamento:
+        pagamentos.append(
+            PainelOperacaoPagamento(
+                pgo_id=normalizar_bigint(item.get("pgo_id")),
+                aco_id=normalizar_bigint(item.get("aco_id")),
+                pct_id=normalizar_bigint(item.get("pct_id")),
+                pgo_data=make_aware_if_needed(item.get("pgo_data")),
+                pgo_valor=decimal_or_zero(item.get("pgo_valor")),
+                fpg_id=item.get("fpg_id"),
+                pgo_parcial=bool(item.get("pgo_parcial")),
+                pgo_etl_alteracao=make_aware_if_needed(item.get("pgo_etl_alteracao")),
+            )
+        )
+
+    return pagamentos
+
+
+def classificar_acordo(data_acordo, tem_pagamento, honorario_liquido):
     valor_emissao = honorario_liquido
     valor_pago = Decimal("0.00")
     valor_avencer = Decimal("0.00")
     valor_quebra = Decimal("0.00")
 
-    if "pago" in status:
+    hoje = timezone.localdate()
+
+    if tem_pagamento:
         valor_pago = honorario_liquido
-    elif "aberto" in status:
-        valor_avencer = honorario_liquido
-    elif "quebr" in status:
-        valor_quebra = honorario_liquido
+    else:
+        if data_acordo and data_acordo.date() >= hoje:
+            valor_avencer = honorario_liquido
+        else:
+            valor_quebra = honorario_liquido
 
     return valor_emissao, valor_pago, valor_avencer, valor_quebra
 
 
-def tratar_registros(registros):
+def criar_registros_locais(registros_acordo, aco_ids_pagos):
     aliases = buscar_alias_operadores()
     supervisores = buscar_mapa_supervisores()
-    tratados = []
+    registros = []
 
-    for r in registros:
-        login_original = (r.get("emitido_por") or "").strip()
-        login_key = login_original.lower()
-        nome_operador = aliases.get(login_key, login_original)
+    for item in registros_acordo:
+        login_original = (item.get("emitido_por") or "").strip()
+        nome_operador = aliases.get(login_original.lower(), login_original)
 
-        cre_id = normalizar_cre_id(r.get("cre_id"))
+        cre_id = normalizar_bigint(item.get("cre_id"))
         supervisor_nome = supervisores.get(cre_id, "SEM SUPERVISOR")
 
-        honorario_liquido = decimal_or_zero(r.get("honorario_liquido"))
-        status_acordo = r.get("status_acordo") or ""
-
-        valor_emissao, valor_pago, valor_avencer, valor_quebra = classificar_status(
-            status_acordo=status_acordo,
-            honorario_liquido=honorario_liquido,
-        )
-
-        data_acordo = make_aware_if_needed(r.get("data_acordo"))
-        data_emissao = make_aware_if_needed(r.get("data_emissao"))
-        data_etl_alteracao = make_aware_if_needed(r.get("data_etl_alteracao"))
+        aco_id = normalizar_bigint(item.get("aco_id"))
+        data_acordo = make_aware_if_needed(item.get("data_acordo"))
+        data_emissao = make_aware_if_needed(item.get("data_emissao"))
+        data_etl_alteracao = make_aware_if_needed(item.get("data_etl_alteracao"))
         data_referencia = data_emissao.date() if data_emissao else None
 
-        registro = PainelOperacaoRegistro(
-            data_referencia=data_referencia,
+        honorario_liquido = decimal_or_zero(item.get("honorario_liquido"))
+        tem_pagamento = aco_id in aco_ids_pagos if aco_id is not None else False
+
+        valor_emissao, valor_pago, valor_avencer, valor_quebra = classificar_acordo(
             data_acordo=data_acordo,
-            data_emissao=data_emissao,
-            data_etl_alteracao=data_etl_alteracao,
-
-            numero_acordo=r.get("numero_acordo") or "",
-            aco_id=r.get("aco_id"),
-            contrato=r.get("contrato") or "",
-
-            cliente=r.get("cliente") or "",
-            cpf_cnpj=r.get("cpf_cnpj") or "",
-
-            cre_id=cre_id,
-            credor=r.get("credor") or "",
-            filial=r.get("filial") or "",
-            tipo_contrato=r.get("tipo_contrato") or "",
-            tipo_negociacao=(r.get("tipo_negociacao") or "").strip(),
-
-            principal_bruto=decimal_or_zero(r.get("principal_bruto")),
-            desconto_principal=decimal_or_zero(r.get("desconto_principal")),
-            principal_liquido=decimal_or_zero(r.get("principal_liquido")),
-
-            multa_bruta=decimal_or_zero(r.get("multa_bruta")),
-            desconto_multa=decimal_or_zero(r.get("desconto_multa")),
-            multa_liquida=decimal_or_zero(r.get("multa_liquida")),
-
-            juros_bruto=decimal_or_zero(r.get("juros_bruto")),
-            desconto_juros=decimal_or_zero(r.get("desconto_juros")),
-            juros_liquido=decimal_or_zero(r.get("juros_liquido")),
-
-            honorario_bruto=decimal_or_zero(r.get("honorario_bruto")),
-            desconto_honorario=decimal_or_zero(r.get("desconto_honorario")),
+            tem_pagamento=tem_pagamento,
             honorario_liquido=honorario_liquido,
-
-            despesas=decimal_or_zero(r.get("despesas")),
-            subtotal_bruto=decimal_or_zero(r.get("subtotal_bruto")),
-            desconto_total=decimal_or_zero(r.get("desconto_total")),
-            valor_total_liquido=decimal_or_zero(r.get("valor_total_liquido")),
-            valor_entrada=decimal_or_zero(r.get("valor_entrada")),
-
-            qtd_parcelas_acordo=r.get("qtd_parcelas_acordo") or 0,
-            status_acordo=status_acordo,
-            tipo_acordo=r.get("tipo_acordo") or "",
-
-            emitido_por_login=login_original,
-            emitido_por_nome=nome_operador,
-            supervisor_nome=supervisor_nome,
-
-            valor_emissao=valor_emissao,
-            valor_pago=valor_pago,
-            valor_avencer=valor_avencer,
-            valor_quebra=valor_quebra,
         )
 
-        tratados.append(registro)
+        registros.append(
+            PainelOperacaoRegistro(
+                data_referencia=data_referencia,
+                data_acordo=data_acordo,
+                data_emissao=data_emissao,
+                data_etl_alteracao=data_etl_alteracao,
 
-    return tratados
+                numero_acordo=item.get("numero_acordo") or "",
+                aco_id=aco_id,
+                contrato=item.get("contrato") or "",
+
+                cliente=item.get("cliente") or "",
+                cpf_cnpj=item.get("cpf_cnpj") or "",
+
+                cre_id=cre_id,
+                credor=item.get("credor") or "",
+                filial=item.get("filial") or "",
+                tipo_contrato=item.get("tipo_contrato") or "",
+                tipo_negociacao=(item.get("tipo_negociacao") or "").strip(),
+
+                principal_bruto=decimal_or_zero(item.get("principal_bruto")),
+                desconto_principal=decimal_or_zero(item.get("desconto_principal")),
+                principal_liquido=decimal_or_zero(item.get("principal_liquido")),
+
+                multa_bruta=decimal_or_zero(item.get("multa_bruta")),
+                desconto_multa=decimal_or_zero(item.get("desconto_multa")),
+                multa_liquida=decimal_or_zero(item.get("multa_liquida")),
+
+                juros_bruto=decimal_or_zero(item.get("juros_bruto")),
+                desconto_juros=decimal_or_zero(item.get("desconto_juros")),
+                juros_liquido=decimal_or_zero(item.get("juros_liquido")),
+
+                honorario_bruto=decimal_or_zero(item.get("honorario_bruto")),
+                desconto_honorario=decimal_or_zero(item.get("desconto_honorario")),
+                honorario_liquido=honorario_liquido,
+
+                despesas=decimal_or_zero(item.get("despesas")),
+                subtotal_bruto=decimal_or_zero(item.get("subtotal_bruto")),
+                desconto_total=decimal_or_zero(item.get("desconto_total")),
+                valor_total_liquido=decimal_or_zero(item.get("valor_total_liquido")),
+                valor_entrada=decimal_or_zero(item.get("valor_entrada")),
+
+                qtd_parcelas_acordo=item.get("qtd_parcelas_acordo") or 0,
+                status_acordo=item.get("status_acordo") or "",
+                tipo_acordo=item.get("tipo_acordo") or "",
+
+                emitido_por_login=login_original,
+                emitido_por_nome=nome_operador,
+                supervisor_nome=supervisor_nome,
+
+                tem_pagamento=tem_pagamento,
+                valor_emissao=valor_emissao,
+                valor_pago=valor_pago,
+                valor_avencer=valor_avencer,
+                valor_quebra=valor_quebra,
+            )
+        )
+
+    return registros
 
 
 def atualizar_configuracao():
@@ -196,24 +219,37 @@ def sincronizar_painel_operacao(data_ini=None, data_fim=None):
     )
 
     try:
-        dados_stage = executar_query_stage(data_ini, data_fim)
-        registros_tratados = tratar_registros(dados_stage)
+        registros_acordo_raw = executar_query(SQL_PAINEL_OPERACAO, data_ini, data_fim)
+        registros_pagamento_raw = executar_query(SQL_PAGAMENTOS_ACORDO, data_ini, data_fim)
+
+        aco_ids_pagos = {
+            normalizar_bigint(item.get("aco_id"))
+            for item in registros_pagamento_raw
+            if normalizar_bigint(item.get("aco_id")) is not None
+        }
+
+        pagamentos_locais = criar_pagamentos_locais(registros_pagamento_raw)
+        registros_locais = criar_registros_locais(registros_acordo_raw, aco_ids_pagos)
 
         with transaction.atomic():
+            PainelOperacaoPagamento.objects.all().delete()
             PainelOperacaoRegistro.objects.all().delete()
 
-            if registros_tratados:
-                PainelOperacaoRegistro.objects.bulk_create(
-                    registros_tratados,
-                    batch_size=1000,
-                )
+            if pagamentos_locais:
+                PainelOperacaoPagamento.objects.bulk_create(pagamentos_locais, batch_size=1000)
+
+            if registros_locais:
+                PainelOperacaoRegistro.objects.bulk_create(registros_locais, batch_size=1000)
 
         atualizar_configuracao()
 
-        mensagem = f"Sincronização concluída. Total: {len(registros_tratados)}"
+        mensagem = (
+            f"Sincronização concluída. "
+            f"Acordos: {len(registros_locais)} | Pagamentos: {len(pagamentos_locais)}"
+        )
 
         log.sucesso = True
-        log.total_registros = len(registros_tratados)
+        log.total_registros = len(registros_locais)
         log.mensagem = mensagem
         log.finalizado_em = timezone.now()
         log.save()
@@ -221,7 +257,8 @@ def sincronizar_painel_operacao(data_ini=None, data_fim=None):
         return {
             "sucesso": True,
             "mensagem": mensagem,
-            "total_registros": len(registros_tratados),
+            "total_registros": len(registros_locais),
+            "total_pagamentos": len(pagamentos_locais),
         }
 
     except Exception as e:
