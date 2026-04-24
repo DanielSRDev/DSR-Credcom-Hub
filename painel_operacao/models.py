@@ -82,6 +82,7 @@ class PainelSyncLog(models.Model):
     sucesso = models.BooleanField("Sucesso", default=False)
     total_registros = models.PositiveIntegerField("Total de registros", default=0)
     mensagem = models.TextField("Mensagem", blank=True, default="")
+    tipo_sync = models.CharField("Tipo sync", max_length=30, default="PAINEL")
 
     class Meta:
         verbose_name = "Log de Sincronização"
@@ -89,7 +90,7 @@ class PainelSyncLog(models.Model):
         ordering = ["-iniciado_em"]
 
     def __str__(self):
-        return f"Sync {self.iniciado_em:%d/%m/%Y %H:%M}"
+        return f"{self.tipo_sync} - {self.iniciado_em:%d/%m/%Y %H:%M}"
 
 
 class PainelOperacaoPagamento(models.Model):
@@ -189,3 +190,61 @@ class PainelOperacaoRegistro(models.Model):
 
     def __str__(self):
         return f"{self.numero_acordo} - {self.cliente}"
+
+
+class PainelOperacaoRelatorioGeral(models.Model):
+    origem_registro = models.CharField("Origem", max_length=30, db_index=True)
+
+    data_referencia = models.DateField("Data de referência", null=True, blank=True)
+    data_acordo = models.DateTimeField("Data do acordo", null=True, blank=True)
+    data_emissao = models.DateTimeField("Data da emissão", null=True, blank=True)
+    data_pagamento = models.DateTimeField("Data do pagamento", null=True, blank=True)
+    data_etl_alteracao = models.DateTimeField("Data ETL alteração", null=True, blank=True)
+
+    numero_acordo = models.CharField("Número do acordo", max_length=100, blank=True, default="")
+    aco_id = models.BigIntegerField("Aco ID", db_index=True)
+    contrato = models.CharField("Contrato", max_length=100, blank=True, default="")
+
+    cliente = models.CharField("Cliente", max_length=255, blank=True, default="")
+    cpf_cnpj = models.CharField("CPF/CNPJ", max_length=30, blank=True, default="")
+
+    cre_id = models.BigIntegerField("Credor ID", null=True, blank=True, db_index=True)
+    credor = models.CharField("Credor", max_length=255, blank=True, default="")
+    filial = models.CharField("Filial", max_length=255, blank=True, default="")
+    tipo_contrato = models.CharField("Tipo contrato", max_length=255, blank=True, default="")
+    tipo_negociacao = models.CharField("Tipo negociação", max_length=500, blank=True, default="")
+
+    honorario_bruto = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    desconto_honorario = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    honorario_liquido = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+
+    qtd_parcelas_acordo = models.IntegerField(default=0)
+    status_acordo = models.CharField(max_length=255, blank=True, default="")
+    tipo_acordo = models.CharField(max_length=255, blank=True, default="")
+
+    emitido_por_login = models.CharField("Emitido por login", max_length=255, blank=True, default="", db_index=True)
+    emitido_por_nome = models.CharField("Emitido por nome", max_length=255, blank=True, default="", db_index=True)
+    supervisor_nome = models.CharField("Supervisor", max_length=150, blank=True, default="", db_index=True)
+
+    valor_emissao = models.DecimalField("Emissao", max_digits=14, decimal_places=2, default=0)
+    valor_pago = models.DecimalField("Pago", max_digits=14, decimal_places=2, default=0)
+    valor_avencer = models.DecimalField("Avencer", max_digits=14, decimal_places=2, default=0)
+    valor_quebra = models.DecimalField("Quebra", max_digits=14, decimal_places=2, default=0)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Relatório Geral do Painel"
+        verbose_name_plural = "Relatórios Gerais do Painel"
+        ordering = ["-data_referencia", "-data_pagamento", "-data_emissao", "-aco_id"]
+        indexes = [
+            models.Index(fields=["origem_registro"]),
+            models.Index(fields=["data_referencia"]),
+            models.Index(fields=["data_pagamento"]),
+            models.Index(fields=["data_emissao"]),
+            models.Index(fields=["aco_id"]),
+            models.Index(fields=["emitido_por_nome"]),
+        ]
+
+    def __str__(self):
+        return f"{self.origem_registro} - {self.numero_acordo} - {self.cliente}"

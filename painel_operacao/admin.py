@@ -7,6 +7,7 @@ from .models import (
     PainelSyncLog,
     PainelOperacaoPagamento,
     PainelOperacaoRegistro,
+    PainelOperacaoRelatorioGeral,
 )
 
 
@@ -47,10 +48,10 @@ class PainelConfiguracaoAdmin(admin.ModelAdmin):
 
 @admin.register(PainelSyncLog)
 class PainelSyncLogAdmin(admin.ModelAdmin):
-    list_display = ("iniciado_em", "finalizado_em", "sucesso", "total_registros")
-    list_filter = ("sucesso",)
+    list_display = ("tipo_sync", "iniciado_em", "finalizado_em", "sucesso", "total_registros")
+    list_filter = ("tipo_sync", "sucesso")
     search_fields = ("mensagem",)
-    readonly_fields = ("iniciado_em", "finalizado_em", "sucesso", "total_registros", "mensagem")
+    readonly_fields = ("tipo_sync", "iniciado_em", "finalizado_em", "sucesso", "total_registros", "mensagem")
 
 
 @admin.register(PainelOperacaoPagamento)
@@ -81,3 +82,24 @@ class PainelOperacaoRegistroAdmin(admin.ModelAdmin):
     search_fields = ("numero_acordo", "cliente", "cpf_cnpj", "contrato", "emitido_por_login", "emitido_por_nome", "aco_id")
     readonly_fields = [field.name for field in PainelOperacaoRegistro._meta.fields]
     ordering = ("-data_emissao",)
+
+
+@admin.register(PainelOperacaoRelatorioGeral)
+class PainelOperacaoRelatorioGeralAdmin(admin.ModelAdmin):
+    list_display = (
+        "origem_registro",
+        "numero_acordo",
+        "cliente",
+        "credor",
+        "emitido_por_nome",
+        "valor_emissao",
+        "valor_pago",
+        "valor_avencer",
+        "valor_quebra",
+        "data_pagamento",
+        "data_emissao",
+    )
+    list_filter = ("origem_registro", "credor", "supervisor_nome", "emitido_por_nome", "status_acordo")
+    search_fields = ("numero_acordo", "cliente", "cpf_cnpj", "contrato", "aco_id", "emitido_por_nome")
+    readonly_fields = [field.name for field in PainelOperacaoRelatorioGeral._meta.fields]
+    ordering = ("-data_referencia", "-data_pagamento", "-data_emissao")

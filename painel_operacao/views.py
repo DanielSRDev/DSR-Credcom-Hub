@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date
 from decimal import Decimal
 from io import BytesIO
 
@@ -15,9 +15,10 @@ from .models import (
     CarteiraSupervisor,
     PainelConfiguracao,
     PainelOperacaoRegistro,
+    PainelOperacaoRelatorioGeral,
     SupervisorPainel,
 )
-from .services import sincronizar_painel_operacao
+from .services import sincronizar_painel_operacao, sincronizar_relatorio_geral
 
 
 def zero_decimal(valor):
@@ -38,14 +39,145 @@ def faixa_operador_classe(valor):
     return "faixa-dourada"
 
 
+def data_comparacao(item):
+    return (
+        item.data_pagamento if hasattr(item, "data_pagamento") and item.data_pagamento else None
+    ) or item.data_emissao or item.data_acordo or item.data_etl_alteracao
+
+
+def classificar_item_painel(item):
+    hoje = date.today()
+
+    if item.tem_pagamento:
+        return "PAGO"
+
+    if item.data_acordo and item.data_acordo.date() < hoje:
+        return "QUEBRA"
+
+    return "AVENCER"
+
+
+def chave_contrato_item(item):
+    contrato = (item.contrato or "").strip()
+
+    if contrato:
+        return contrato
+
+    if item.aco_id:
+        return f"ACO_{item.aco_id}"
+
+    numero_acordo = (item.numero_acordo or "").strip()
+    if numero_acordo:
+        return f"NUM_{numero_acordo}"
+
+    return f"REG_{item.id}"
+
+
+def pegar_mais_recente_itens(itens):
+    if not itens:
+        return None
+
+    return sorted(
+        itens,
+        key=lambda item: data_comparacao(item) or item.created_at,
+        reverse=True,
+    )[0]
+
+
+def consolidar_itens_painel(itens):
+    grupos = {}
+
+    for item in itens:
+        chave = chave_contrato_item(item)
+        grupos.setdefault(chave, []).append(item)
+
+    resultado = []
+
+    for _, grupo in grupos.items():
+        pagos = []
+        avencers = []
+        quebras = []
+
+        for item in grupo:
+            status = classificar_item_painel(item)
+
+            if status == "PAGO":
+                pagos.append(item)
+            elif status == "AVENCER":
+                avencers.append(item)
+            else:
+                quebras.append(item)
+
+        pago_recente = pegar_mais_recente_itens(pagos)
+        avencer_recente = pegar_mais_recente_itens(avencers)
+        quebra_recente = pegar_mais_recente_itens(quebras)
+
+        if pago_recente and quebra_recente:
+            data_pago = data_comparacao(pago_recente) or pago_recente.created_at
+            data_quebra = data_comparacao(quebra_recente) or quebra_recente.created_at
+
+            if data_quebra > data_pago:
+                resultado.append(pago_recente)
+                resultado.append(quebra_recente)
+            else:
+                resultado.append(pago_recente)
+            continue
+
+        if avencer_recente and quebra_recente:
+            resultado.append(avencer_recente)
+            continue
+
+        if pago_recente and avencer_recente:
+            resultado.append(pago_recente)
+            resultado.append(avencer_recente)
+            continue
+
+        if pago_recente:
+            resultado.append(pago_recente)
+            continue
+
+        if avencer_recente:
+            resultado.append(avencer_recente)
+            continue
+
+        if quebra_recente:
+            resultado.append(quebra_recente)
+            continue
+
+    return resultado
+
+
+def calcular_valores_item(item):
+    valor = zero_decimal(item.honorario_liquido)
+    status = classificar_item_painel(item)
+
+    emissao = valor
+    pago = Decimal("0.00")
+    avencer = Decimal("0.00")
+    quebra = Decimal("0.00")
+
+    if status == "PAGO":
+        pago = valor
+    elif status == "AVENCER":
+        avencer = valor
+    else:
+        quebra = valor
+
+    return {
+        "status": status,
+        "emissao": emissao,
+        "pago": pago,
+        "avencer": avencer,
+        "quebra": quebra,
+    }
+
+
 def aplicar_filtros_painel(request):
     hoje = date.today()
-    data_ini_padrao = hoje
-    data_fim_padrao = hoje
 
     dados_iniciais = {
-        "data_ini": request.GET.get("data_ini") or data_ini_padrao,
-        "data_fim": request.GET.get("data_fim") or data_fim_padrao,
+        "data_ini": request.GET.get("data_ini") or hoje,
+        "data_fim": request.GET.get("data_fim") or hoje,
         "supervisor": request.GET.get("supervisor") or "",
         "operador": request.GET.get("operador") or "",
         "credor": request.GET.get("credor") or "",
@@ -53,8 +185,7 @@ def aplicar_filtros_painel(request):
 
     form = PainelOperacaoFiltroForm(dados_iniciais or None)
 
-    qs_base = PainelOperacaoRegistro.objects.all()
-    qs = qs_base.order_by("-valor_emissao", "emitido_por_nome")
+    qs = PainelOperacaoRegistro.objects.all().order_by("-data_emissao", "-aco_id")
 
     data_ini = None
     data_fim = None
@@ -80,10 +211,13 @@ def aplicar_filtros_painel(request):
         if credor:
             qs = qs.filter(credor=credor)
 
+    itens_brutos = list(qs)
+    itens_consolidados = consolidar_itens_painel(itens_brutos)
+
     return {
         "form": form,
         "qs": qs,
-        "qs_base": qs_base,
+        "itens": itens_consolidados,
         "data_ini": data_ini,
         "data_fim": data_fim,
         "supervisor": supervisor,
@@ -92,26 +226,42 @@ def aplicar_filtros_painel(request):
     }
 
 
+def somar_itens(itens):
+    total_emissao = Decimal("0.00")
+    total_pago = Decimal("0.00")
+    total_avencer = Decimal("0.00")
+    total_quebra = Decimal("0.00")
+
+    for item in itens:
+        valores = calcular_valores_item(item)
+        total_emissao += valores["emissao"]
+        total_pago += valores["pago"]
+        total_avencer += valores["avencer"]
+        total_quebra += valores["quebra"]
+
+    return {
+        "emissao": total_emissao,
+        "pago": total_pago,
+        "avencer": total_avencer,
+        "quebra": total_quebra,
+    }
+
+
 @login_required
 def painel_view(request):
     filtros = aplicar_filtros_painel(request)
 
     form = filtros["form"]
-    qs = filtros["qs"]
+    itens = filtros["itens"]
     data_ini = filtros["data_ini"]
     data_fim = filtros["data_fim"]
 
-    totais = qs.aggregate(
-        total_emissao=Sum("valor_emissao"),
-        total_pago=Sum("valor_pago"),
-        total_avencer=Sum("valor_avencer"),
-        total_quebra=Sum("valor_quebra"),
-    )
+    totais = somar_itens(itens)
 
-    total_emissao = zero_decimal(totais["total_emissao"])
-    total_pago = zero_decimal(totais["total_pago"])
-    total_avencer = zero_decimal(totais["total_avencer"])
-    total_quebra = zero_decimal(totais["total_quebra"])
+    total_emissao = totais["emissao"]
+    total_pago = totais["pago"]
+    total_avencer = totais["avencer"]
+    total_quebra = totais["quebra"]
 
     config = PainelConfiguracao.objects.filter(ativo=True).first()
 
@@ -122,62 +272,55 @@ def painel_view(request):
     if meta_diaria_restante < 0:
         meta_diaria_restante = Decimal("0.00")
 
-    qs_periodo = PainelOperacaoRegistro.objects.all()
-    if data_ini:
-        qs_periodo = qs_periodo.filter(data_referencia__gte=data_ini)
-    if data_fim:
-        qs_periodo = qs_periodo.filter(data_referencia__lte=data_fim)
-
     resumo_supervisores = []
     supervisores = SupervisorPainel.objects.filter(ativo=True).order_by("ordem", "nome")
 
     for sup in supervisores:
-        cre_ids_supervisor = list(
-            CarteiraSupervisor.objects.filter(
-                ativo=True,
-                supervisor=sup,
-            ).values_list("cre_id", flat=True)
-        )
-
-        qs_sup = qs.filter(supervisor_nome=sup.nome)
-        agg_principal = qs_sup.aggregate(
-            emissao=Sum("valor_emissao"),
-            pago=Sum("valor_pago"),
-            avencer=Sum("valor_avencer"),
-        )
-
-        agg_quebra = qs_periodo.filter(
-            cre_id__in=cre_ids_supervisor
-        ).aggregate(
-            quebra=Sum("valor_quebra")
-        )
+        itens_sup = [item for item in itens if item.supervisor_nome == sup.nome]
+        totais_sup = somar_itens(itens_sup)
 
         resumo_supervisores.append({
             "nome": sup.nome,
-            "emissao": zero_decimal(agg_principal["emissao"]),
-            "pago": zero_decimal(agg_principal["pago"]),
-            "avencer": zero_decimal(agg_principal["avencer"]),
-            "quebra": zero_decimal(agg_quebra["quebra"]),
+            "emissao": totais_sup["emissao"],
+            "pago": totais_sup["pago"],
+            "avencer": totais_sup["avencer"],
+            "quebra": totais_sup["quebra"],
         })
 
-    ranking_raw = (
-        qs.values("emitido_por_nome", "supervisor_nome")
-        .annotate(
-            emissao=Sum("valor_emissao"),
-            pago=Sum("valor_pago"),
-            avencer=Sum("valor_avencer"),
-            quebra=Sum("valor_quebra"),
-        )
-        .order_by("-emissao", "emitido_por_nome")
+    agrupado_operadores = {}
+
+    for item in itens:
+        chave = (item.emitido_por_nome or "SEM NOME", item.supervisor_nome or "SEM SUPERVISOR")
+        agrupado_operadores.setdefault(chave, {
+            "emitido_por_nome": chave[0],
+            "supervisor_nome": chave[1],
+            "emissao": Decimal("0.00"),
+            "pago": Decimal("0.00"),
+            "avencer": Decimal("0.00"),
+            "quebra": Decimal("0.00"),
+        })
+
+        valores = calcular_valores_item(item)
+        agrupado_operadores[chave]["emissao"] += valores["emissao"]
+        agrupado_operadores[chave]["pago"] += valores["pago"]
+        agrupado_operadores[chave]["avencer"] += valores["avencer"]
+        agrupado_operadores[chave]["quebra"] += valores["quebra"]
+
+    ranking_base = sorted(
+        agrupado_operadores.values(),
+        key=lambda x: x["emissao"],
+        reverse=True,
     )
 
     ranking_operadores = []
-    for idx, item in enumerate(ranking_raw, start=1):
+
+    for idx, item in enumerate(ranking_base, start=1):
         emissao = zero_decimal(item["emissao"])
+
         ranking_operadores.append({
             "posicao": idx,
-            "emitido_por_nome": item["emitido_por_nome"] or "SEM NOME",
-            "supervisor_nome": item["supervisor_nome"] or "SEM SUPERVISOR",
+            "emitido_por_nome": item["emitido_por_nome"],
+            "supervisor_nome": item["supervisor_nome"],
             "emissao": emissao,
             "pago": zero_decimal(item["pago"]),
             "avencer": zero_decimal(item["avencer"]),
@@ -199,148 +342,105 @@ def painel_view(request):
         "resumo_supervisores": resumo_supervisores,
         "ranking_operadores": ranking_operadores,
     }
+
     return render(request, "painel_operacao/painel.html", context)
 
 
 @login_required
 def exportar_excel_view(request):
     filtros = aplicar_filtros_painel(request)
-    qs = filtros["qs"]
+    itens = filtros["itens"]
     data_ini = filtros["data_ini"]
     data_fim = filtros["data_fim"]
 
-    registros = list(
-        qs.values(
-            "data_referencia",
-            "data_acordo",
-            "data_emissao",
-            "numero_acordo",
-            "aco_id",
-            "cliente",
-            "cpf_cnpj",
-            "contrato",
-            "cre_id",
-            "credor",
-            "filial",
-            "tipo_contrato",
-            "tipo_negociacao",
-            "emitido_por_nome",
-            "emitido_por_login",
-            "supervisor_nome",
-            "tem_pagamento",
-            "status_acordo",
-            "honorario_liquido",
-            "valor_emissao",
-            "valor_pago",
-            "valor_avencer",
-            "valor_quebra",
-        )
-    )
+    registros = []
+
+    for item in itens:
+        valores = calcular_valores_item(item)
+
+        registros.append({
+            "Data Referência": item.data_referencia,
+            "Data Acordo": item.data_acordo,
+            "Data Emissão": item.data_emissao,
+            "Número Acordo": item.numero_acordo,
+            "Aco ID": item.aco_id,
+            "Cliente": item.cliente,
+            "CPF/CNPJ": item.cpf_cnpj,
+            "Contrato": item.contrato,
+            "Credor ID": item.cre_id,
+            "Credor": item.credor,
+            "Filial": item.filial,
+            "Tipo Contrato": item.tipo_contrato,
+            "Tipo Negociação": item.tipo_negociacao,
+            "Operador": item.emitido_por_nome,
+            "Login Operador": item.emitido_por_login,
+            "Supervisor": item.supervisor_nome,
+            "Tem Pagamento": item.tem_pagamento,
+            "Status Acordo Original": item.status_acordo,
+            "Status Calculado": valores["status"],
+            "Honorário Líquido": valores["emissao"],
+            "Emissão": valores["emissao"],
+            "Pago": valores["pago"],
+            "Avencer": valores["avencer"],
+            "Quebra": valores["quebra"],
+        })
 
     df_detalhado = pd.DataFrame(registros)
 
-    if not df_detalhado.empty:
-        # remove timezone das colunas datetime para o Excel aceitar
-        colunas_datetime = ["data_acordo", "data_emissao"]
-        for col in colunas_datetime:
-            if col in df_detalhado.columns:
-                df_detalhado[col] = pd.to_datetime(df_detalhado[col], errors="coerce")
-                try:
-                    df_detalhado[col] = df_detalhado[col].dt.tz_localize(None)
-                except TypeError:
-                    # se já estiver sem timezone, segue normal
-                    pass
-
-        if "data_referencia" in df_detalhado.columns:
-            df_detalhado["data_referencia"] = pd.to_datetime(
-                df_detalhado["data_referencia"], errors="coerce"
-            )
-
-        df_detalhado = df_detalhado.rename(columns={
-            "data_referencia": "Data Referência",
-            "data_acordo": "Data Acordo",
-            "data_emissao": "Data Emissão",
-            "numero_acordo": "Número Acordo",
-            "aco_id": "Aco ID",
-            "cliente": "Cliente",
-            "cpf_cnpj": "CPF/CNPJ",
-            "contrato": "Contrato",
-            "cre_id": "Credor ID",
-            "credor": "Credor",
-            "filial": "Filial",
-            "tipo_contrato": "Tipo Contrato",
-            "tipo_negociacao": "Tipo Negociação",
-            "emitido_por_nome": "Operador",
-            "emitido_por_login": "Login Operador",
-            "supervisor_nome": "Supervisor",
-            "tem_pagamento": "Tem Pagamento",
-            "status_acordo": "Status Acordo Original",
-            "honorario_liquido": "Honorário Líquido",
-            "valor_emissao": "Emissão",
-            "valor_pago": "Pago",
-            "valor_avencer": "Avencer",
-            "valor_quebra": "Quebra",
-        })
-
-    totais = qs.aggregate(
-        total_emissao=Sum("valor_emissao"),
-        total_pago=Sum("valor_pago"),
-        total_avencer=Sum("valor_avencer"),
-        total_quebra=Sum("valor_quebra"),
-    )
+    totais = somar_itens(itens)
 
     df_resumo = pd.DataFrame([
         {
             "Período Inicial": data_ini.strftime("%d/%m/%Y") if data_ini else "",
             "Período Final": data_fim.strftime("%d/%m/%Y") if data_fim else "",
-            "Total Emissão": float(zero_decimal(totais["total_emissao"])),
-            "Total Pago": float(zero_decimal(totais["total_pago"])),
-            "Total Avencer": float(zero_decimal(totais["total_avencer"])),
-            "Total Quebra": float(zero_decimal(totais["total_quebra"])),
-            "Qtd Registros": qs.count(),
+            "Total Emissão": float(totais["emissao"]),
+            "Total Pago": float(totais["pago"]),
+            "Total Avencer": float(totais["avencer"]),
+            "Total Quebra": float(totais["quebra"]),
+            "Qtd Registros": len(itens),
         }
     ])
 
-    df_supervisores = pd.DataFrame(
-        list(
-            qs.values("supervisor_nome").annotate(
-                total_emissao=Sum("valor_emissao"),
-                total_pago=Sum("valor_pago"),
-                total_avencer=Sum("valor_avencer"),
-                total_quebra=Sum("valor_quebra"),
-            ).order_by("supervisor_nome")
-        )
-    )
+    df_supervisores = pd.DataFrame([
+        {
+            "Supervisor": sup.nome,
+            "Emissão": float(somar_itens([item for item in itens if item.supervisor_nome == sup.nome])["emissao"]),
+            "Pago": float(somar_itens([item for item in itens if item.supervisor_nome == sup.nome])["pago"]),
+            "Avencer": float(somar_itens([item for item in itens if item.supervisor_nome == sup.nome])["avencer"]),
+            "Quebra": float(somar_itens([item for item in itens if item.supervisor_nome == sup.nome])["quebra"]),
+        }
+        for sup in SupervisorPainel.objects.filter(ativo=True).order_by("ordem", "nome")
+    ])
 
-    if not df_supervisores.empty:
-        df_supervisores = df_supervisores.rename(columns={
-            "supervisor_nome": "Supervisor",
-            "total_emissao": "Emissão",
-            "total_pago": "Pago",
-            "total_avencer": "Avencer",
-            "total_quebra": "Quebra",
+    operadores = {}
+    for item in itens:
+        chave = (item.emitido_por_nome or "SEM NOME", item.supervisor_nome or "SEM SUPERVISOR")
+        operadores.setdefault(chave, {
+            "Operador": chave[0],
+            "Supervisor": chave[1],
+            "Emissão": Decimal("0.00"),
+            "Pago": Decimal("0.00"),
+            "Avencer": Decimal("0.00"),
+            "Quebra": Decimal("0.00"),
         })
 
-    df_operadores = pd.DataFrame(
-        list(
-            qs.values("emitido_por_nome", "supervisor_nome").annotate(
-                total_emissao=Sum("valor_emissao"),
-                total_pago=Sum("valor_pago"),
-                total_avencer=Sum("valor_avencer"),
-                total_quebra=Sum("valor_quebra"),
-            ).order_by("-total_emissao", "emitido_por_nome")
-        )
-    )
+        valores = calcular_valores_item(item)
+        operadores[chave]["Emissão"] += valores["emissao"]
+        operadores[chave]["Pago"] += valores["pago"]
+        operadores[chave]["Avencer"] += valores["avencer"]
+        operadores[chave]["Quebra"] += valores["quebra"]
 
-    if not df_operadores.empty:
-        df_operadores = df_operadores.rename(columns={
-            "emitido_por_nome": "Operador",
-            "supervisor_nome": "Supervisor",
-            "total_emissao": "Emissão",
-            "total_pago": "Pago",
-            "total_avencer": "Avencer",
-            "total_quebra": "Quebra",
-        })
+    df_operadores = pd.DataFrame([
+        {
+            "Operador": item["Operador"],
+            "Supervisor": item["Supervisor"],
+            "Emissão": float(item["Emissão"]),
+            "Pago": float(item["Pago"]),
+            "Avencer": float(item["Avencer"]),
+            "Quebra": float(item["Quebra"]),
+        }
+        for item in sorted(operadores.values(), key=lambda x: x["Emissão"], reverse=True)
+    ])
 
     output = BytesIO()
 
@@ -351,13 +451,8 @@ def exportar_excel_view(request):
         df_operadores.to_excel(writer, sheet_name="Operadores", index=False)
 
         workbook = writer.book
-
         formato_moeda = workbook.add_format({"num_format": 'R$ #,##0.00'})
-        formato_cabecalho = workbook.add_format({
-            "bold": True,
-            "bg_color": "#D9EAF7",
-            "border": 1,
-        })
+        formato_cabecalho = workbook.add_format({"bold": True, "bg_color": "#D9EAF7", "border": 1})
         formato_data = workbook.add_format({"num_format": "dd/mm/yyyy"})
         formato_datetime = workbook.add_format({"num_format": "dd/mm/yyyy hh:mm"})
 
@@ -375,40 +470,206 @@ def exportar_excel_view(request):
             for idx, col in enumerate(df.columns):
                 largura = max(len(str(col)) + 2, 15)
                 if not df.empty:
-                    largura = max(largura, min(40, int(df[col].astype(str).map(len).max()) + 2))
+                    largura = max(largura, min(45, int(df[col].astype(str).map(len).max()) + 2))
                 worksheet.set_column(idx, idx, largura)
 
-            if nome_aba == "Detalhado":
-                colunas_moeda = [
-                    "Honorário Líquido", "Emissão", "Pago", "Avencer", "Quebra"
-                ]
-                colunas_data = ["Data Referência"]
-                colunas_datetime = ["Data Acordo", "Data Emissão"]
+            for col in ["Honorário Líquido", "Emissão", "Pago", "Avencer", "Quebra", "Total Emissão", "Total Pago", "Total Avencer", "Total Quebra"]:
+                if col in df.columns:
+                    idx = df.columns.get_loc(col)
+                    worksheet.set_column(idx, idx, 16, formato_moeda)
 
-                for col in colunas_moeda:
-                    if col in df.columns:
-                        idx = df.columns.get_loc(col)
-                        worksheet.set_column(idx, idx, 16, formato_moeda)
+            for col in ["Data Referência"]:
+                if col in df.columns:
+                    idx = df.columns.get_loc(col)
+                    worksheet.set_column(idx, idx, 14, formato_data)
 
-                for col in colunas_data:
-                    if col in df.columns:
-                        idx = df.columns.get_loc(col)
-                        worksheet.set_column(idx, idx, 14, formato_data)
-
-                for col in colunas_datetime:
-                    if col in df.columns:
-                        idx = df.columns.get_loc(col)
-                        worksheet.set_column(idx, idx, 18, formato_datetime)
-
-            if nome_aba in ["Resumo", "Supervisores", "Operadores"]:
-                for col in df.columns:
-                    if col in ["Emissão", "Pago", "Avencer", "Quebra", "Total Emissão", "Total Pago", "Total Avencer", "Total Quebra"]:
-                        idx = df.columns.get_loc(col)
-                        worksheet.set_column(idx, idx, 16, formato_moeda)
+            for col in ["Data Acordo", "Data Emissão"]:
+                if col in df.columns:
+                    idx = df.columns.get_loc(col)
+                    worksheet.set_column(idx, idx, 18, formato_datetime)
 
     output.seek(0)
 
     nome_arquivo = f"validacao_painel_operacao_{date.today().strftime('%Y%m%d')}.xlsx"
+
+    response = HttpResponse(
+        output.read(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    response["Content-Disposition"] = f'attachment; filename="{nome_arquivo}"'
+    return response
+
+
+@login_required
+def atualizar_relatorio_geral_view(request):
+    if request.method != "POST":
+        return redirect("painel_operacao:painel")
+
+    data_ini_str = request.POST.get("data_ini")
+    data_fim_str = request.POST.get("data_fim")
+
+    try:
+        data_ini = date.fromisoformat(data_ini_str) if data_ini_str else date(2026, 4, 1)
+        data_fim = date.fromisoformat(data_fim_str) if data_fim_str else date.today()
+
+        resultado = sincronizar_relatorio_geral(
+            data_ini=data_ini,
+            data_fim=data_fim,
+        )
+
+        messages.success(
+            request,
+            f"{resultado['mensagem']} | Período usado: {data_ini.strftime('%d/%m/%Y')} até {data_fim.strftime('%d/%m/%Y')}"
+        )
+
+    except Exception as e:
+        messages.error(request, f"Erro ao atualizar relatório geral: {e}")
+
+    url = reverse("painel_operacao:painel")
+    return redirect(f"{url}?data_ini={data_ini_str or '2026-04-01'}&data_fim={data_fim_str or date.today().isoformat()}")
+
+
+@login_required
+def exportar_relatorio_geral_view(request):
+    data_ini_str = request.GET.get("data_ini")
+    data_fim_str = request.GET.get("data_fim")
+    supervisor = request.GET.get("supervisor")
+    operador = request.GET.get("operador")
+    credor = request.GET.get("credor")
+
+    qs = PainelOperacaoRelatorioGeral.objects.all().order_by(
+        "-data_referencia",
+        "-data_pagamento",
+        "-data_emissao",
+    )
+
+    if data_ini_str:
+        try:
+            data_ini = date.fromisoformat(data_ini_str)
+            qs = qs.filter(data_referencia__gte=data_ini)
+        except ValueError:
+            pass
+
+    if data_fim_str:
+        try:
+            data_fim = date.fromisoformat(data_fim_str)
+            qs = qs.filter(data_referencia__lte=data_fim)
+        except ValueError:
+            pass
+
+    if supervisor:
+        qs = qs.filter(supervisor_nome=supervisor)
+    if operador:
+        qs = qs.filter(emitido_por_nome=operador)
+    if credor:
+        qs = qs.filter(credor=credor)
+
+    registros = list(
+        qs.values(
+            "origem_registro",
+            "data_referencia",
+            "data_acordo",
+            "data_emissao",
+            "data_pagamento",
+            "numero_acordo",
+            "aco_id",
+            "cliente",
+            "cpf_cnpj",
+            "contrato",
+            "credor",
+            "filial",
+            "tipo_contrato",
+            "tipo_negociacao",
+            "emitido_por_nome",
+            "supervisor_nome",
+            "status_acordo",
+            "honorario_liquido",
+            "valor_emissao",
+            "valor_pago",
+            "valor_avencer",
+            "valor_quebra",
+        )
+    )
+
+    df = pd.DataFrame(registros)
+
+    if not df.empty:
+        for col in ["data_acordo", "data_emissao", "data_pagamento"]:
+            if col in df.columns:
+                df[col] = pd.to_datetime(df[col], errors="coerce")
+                try:
+                    df[col] = df[col].dt.tz_localize(None)
+                except TypeError:
+                    pass
+
+        if "data_referencia" in df.columns:
+            df["data_referencia"] = pd.to_datetime(df["data_referencia"], errors="coerce")
+
+        df = df.rename(columns={
+            "origem_registro": "Origem",
+            "data_referencia": "Data Referência",
+            "data_acordo": "Data Acordo",
+            "data_emissao": "Data Emissão",
+            "data_pagamento": "Data Pagamento",
+            "numero_acordo": "Número Acordo",
+            "aco_id": "Aco ID",
+            "cliente": "Cliente",
+            "cpf_cnpj": "CPF/CNPJ",
+            "contrato": "Contrato",
+            "credor": "Credor",
+            "filial": "Filial",
+            "tipo_contrato": "Tipo Contrato",
+            "tipo_negociacao": "Tipo Negociação",
+            "emitido_por_nome": "Operador",
+            "supervisor_nome": "Supervisor",
+            "status_acordo": "Status Acordo Original",
+            "honorario_liquido": "Honorário Líquido",
+            "valor_emissao": "Emissão",
+            "valor_pago": "Pago",
+            "valor_avencer": "Avencer",
+            "valor_quebra": "Quebra",
+        })
+
+    output = BytesIO()
+
+    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+        df.to_excel(writer, sheet_name="Relatorio Geral", index=False)
+
+        workbook = writer.book
+        worksheet = writer.sheets["Relatorio Geral"]
+
+        formato_moeda = workbook.add_format({"num_format": 'R$ #,##0.00'})
+        formato_cabecalho = workbook.add_format({"bold": True, "bg_color": "#D9EAF7", "border": 1})
+        formato_data = workbook.add_format({"num_format": "dd/mm/yyyy"})
+        formato_datetime = workbook.add_format({"num_format": "dd/mm/yyyy hh:mm"})
+
+        for col_num, value in enumerate(df.columns.values):
+            worksheet.write(0, col_num, value, formato_cabecalho)
+
+        for idx, col in enumerate(df.columns):
+            largura = max(len(str(col)) + 2, 15)
+            if not df.empty:
+                largura = max(largura, min(45, int(df[col].astype(str).map(len).max()) + 2))
+            worksheet.set_column(idx, idx, largura)
+
+        for col in ["Honorário Líquido", "Emissão", "Pago", "Avencer", "Quebra"]:
+            if col in df.columns:
+                idx = df.columns.get_loc(col)
+                worksheet.set_column(idx, idx, 16, formato_moeda)
+
+        for col in ["Data Referência"]:
+            if col in df.columns:
+                idx = df.columns.get_loc(col)
+                worksheet.set_column(idx, idx, 14, formato_data)
+
+        for col in ["Data Acordo", "Data Emissão", "Data Pagamento"]:
+            if col in df.columns:
+                idx = df.columns.get_loc(col)
+                worksheet.set_column(idx, idx, 18, formato_datetime)
+
+    output.seek(0)
+
+    nome_arquivo = f"relatorio_geral_painel_operacao_{date.today().strftime('%Y%m%d')}.xlsx"
 
     response = HttpResponse(
         output.read(),
@@ -432,15 +693,8 @@ def atualizar_view(request):
     data_fim_str = request.POST.get("data_fim")
 
     try:
-        try:
-            data_ini = date.fromisoformat(data_ini_str) if data_ini_str else date(2026, 4, 1)
-        except ValueError:
-            data_ini = datetime.strptime(data_ini_str, "%d/%m/%Y").date() if data_ini_str else date(2026, 4, 1)
-
-        try:
-            data_fim = date.fromisoformat(data_fim_str) if data_fim_str else date.today()
-        except ValueError:
-            data_fim = datetime.strptime(data_fim_str, "%d/%m/%Y").date() if data_fim_str else date.today()
+        data_ini = date.fromisoformat(data_ini_str) if data_ini_str else date(2026, 4, 1)
+        data_fim = date.fromisoformat(data_fim_str) if data_fim_str else date.today()
 
         resultado = sincronizar_painel_operacao(
             data_ini=data_ini,
@@ -456,4 +710,4 @@ def atualizar_view(request):
         messages.error(request, f"Erro ao atualizar painel: {e}")
 
     url = reverse("painel_operacao:painel")
-    return redirect(f"{url}?data_ini={data_ini.isoformat()}&data_fim={data_fim.isoformat()}")
+    return redirect(f"{url}?data_ini={data_ini_str or '2026-04-01'}&data_fim={data_fim_str or date.today().isoformat()}")

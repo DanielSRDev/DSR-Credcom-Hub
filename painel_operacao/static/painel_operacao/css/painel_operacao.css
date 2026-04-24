@@ -356,3 +356,24 @@
         font-size: 26px;
     }
 }
+
+
+.btn {
+    border-radius: 10px;
+    font-weight: 600;
+    transition: all 0.2s ease;
+}
+
+.btn:hover {
+    transform: translateY(-1px);
+}
+
+.btn-warning {
+    background: linear-gradient(45deg, #ffc107, #ff9800);
+    border: none;
+}
+
+.btn-dark {
+    background: #2c2f33;
+    border: none;
+}
