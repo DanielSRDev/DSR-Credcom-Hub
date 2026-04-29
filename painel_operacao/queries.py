@@ -47,25 +47,39 @@ base_acordo AS (
         a.aco_status,
         a.aco_tipo,
         a.aco_etl_alteracao,
-        pss.pes_nome,
-        pss.pes_cpfcnpj,
-        c.con_numero,
-        c.cre_id,
-        c.fil_id,
-        c.pro_id
+
+        COALESCE(pss.pes_nome, pss_nv.pes_nome) AS pes_nome,
+        COALESCE(pss.pes_cpfcnpj, pss_nv.pes_cpfcnpj) AS pes_cpfcnpj,
+
+        COALESCE(c.con_numero, c_nv.con_numero) AS con_numero,
+        COALESCE(c.cre_id, c_nv.cre_id) AS cre_id,
+        COALESCE(c.fil_id, c_nv.fil_id) AS fil_id,
+        COALESCE(c.pro_id, c_nv.pro_id) AS pro_id
     FROM dbo.tb_acordo a
-    INNER JOIN dbo.tb_acordo_parcela ap
+
+    LEFT JOIN dbo.tb_acordo_parcela ap
         ON ap.aco_id = a.aco_id
-    INNER JOIN dbo.tb_parcela p
+    LEFT JOIN dbo.tb_parcela p
         ON p.par_id = ap.par_id
-    INNER JOIN dbo.tb_negociacao n
+    LEFT JOIN dbo.tb_negociacao n
         ON n.neg_id = p.neg_id
-    INNER JOIN dbo.tb_contrato c
+    LEFT JOIN dbo.tb_contrato c
         ON c.con_id = n.con_id
-    INNER JOIN dbo.tb_cliente cl
+    LEFT JOIN dbo.tb_cliente cl
         ON cl.cli_id = c.cli_id
-    INNER JOIN dbo.tb_pessoa pss
+    LEFT JOIN dbo.tb_pessoa pss
         ON pss.pes_id = cl.cli_id
+
+    LEFT JOIN dbo.tb_negociacao_vinculo nv
+        ON nv.aco_id = a.aco_id
+    LEFT JOIN dbo.tb_negociacao n_nv
+        ON n_nv.neg_id = nv.neg_id
+    LEFT JOIN dbo.tb_contrato c_nv
+        ON c_nv.con_id = n_nv.con_id
+    LEFT JOIN dbo.tb_cliente cl_nv
+        ON cl_nv.cli_id = c_nv.cli_id
+    LEFT JOIN dbo.tb_pessoa pss_nv
+        ON pss_nv.pes_id = cl_nv.cli_id
 )
 SELECT
     b.aco_numero AS numero_acordo,
@@ -127,6 +141,10 @@ LEFT JOIN dbo.tb_acordo_campo ac_tipo
     ON ac_tipo.aco_id = b.aco_id
    AND ac_tipo.cca_id = tnc.cca_id
    AND ac_tipo.cca_valor IS NOT NULL
+WHERE (
+    b.aco_data IS NULL
+    OR b.aco_data < DATEADD(DAY, 1, %s)
+)
 GROUP BY
     b.aco_numero,
     b.aco_id,
@@ -214,25 +232,39 @@ base_acordo AS (
         a.aco_status,
         a.aco_tipo,
         a.aco_etl_alteracao,
-        pss.pes_nome,
-        pss.pes_cpfcnpj,
-        c.con_numero,
-        c.cre_id,
-        c.fil_id,
-        c.pro_id
+
+        COALESCE(pss.pes_nome, pss_nv.pes_nome) AS pes_nome,
+        COALESCE(pss.pes_cpfcnpj, pss_nv.pes_cpfcnpj) AS pes_cpfcnpj,
+
+        COALESCE(c.con_numero, c_nv.con_numero) AS con_numero,
+        COALESCE(c.cre_id, c_nv.cre_id) AS cre_id,
+        COALESCE(c.fil_id, c_nv.fil_id) AS fil_id,
+        COALESCE(c.pro_id, c_nv.pro_id) AS pro_id
     FROM dbo.tb_acordo a
-    INNER JOIN dbo.tb_acordo_parcela ap
+
+    LEFT JOIN dbo.tb_acordo_parcela ap
         ON ap.aco_id = a.aco_id
-    INNER JOIN dbo.tb_parcela p
+    LEFT JOIN dbo.tb_parcela p
         ON p.par_id = ap.par_id
-    INNER JOIN dbo.tb_negociacao n
+    LEFT JOIN dbo.tb_negociacao n
         ON n.neg_id = p.neg_id
-    INNER JOIN dbo.tb_contrato c
+    LEFT JOIN dbo.tb_contrato c
         ON c.con_id = n.con_id
-    INNER JOIN dbo.tb_cliente cl
+    LEFT JOIN dbo.tb_cliente cl
         ON cl.cli_id = c.cli_id
-    INNER JOIN dbo.tb_pessoa pss
+    LEFT JOIN dbo.tb_pessoa pss
         ON pss.pes_id = cl.cli_id
+
+    LEFT JOIN dbo.tb_negociacao_vinculo nv
+        ON nv.aco_id = a.aco_id
+    LEFT JOIN dbo.tb_negociacao n_nv
+        ON n_nv.neg_id = nv.neg_id
+    LEFT JOIN dbo.tb_contrato c_nv
+        ON c_nv.con_id = n_nv.con_id
+    LEFT JOIN dbo.tb_cliente cl_nv
+        ON cl_nv.cli_id = c_nv.cli_id
+    LEFT JOIN dbo.tb_pessoa pss_nv
+        ON pss_nv.pes_id = cl_nv.cli_id
 )
 SELECT
     'HUB' AS origem_registro,
@@ -310,17 +342,30 @@ ORDER BY ev.evc_data DESC
 """
 
 SQL_RELATORIO_GERAL_PAGOS_EXTRA = """
-;WITH tipo_negociacao_campo AS (
-    SELECT cca_id
-    FROM dbo.tb_credor_campo
-    WHERE cca_nivel = 4
-      AND cca_nome = 'Tipo de Negociação'
+;WITH periodo AS (
+    SELECT
+        CAST(%s AS DATE) AS data_ini,
+        CAST(%s AS DATE) AS data_fim
+),
+pagamentos_periodo AS (
+    SELECT
+        p.pgo_id,
+        p.aco_id,
+        p.pgo_data AS data_pagamento,
+        ROW_NUMBER() OVER (
+            PARTITION BY p.aco_id
+            ORDER BY p.pgo_data DESC, p.pgo_id DESC
+        ) AS rn
+    FROM dbo.tb_pagamento p
+    CROSS JOIN periodo per
+    WHERE p.pgo_data >= per.data_ini
+      AND p.pgo_data < DATEADD(DAY, 1, per.data_fim)
+      AND p.aco_id IS NOT NULL
 ),
 evento_acordo AS (
     SELECT
         ce.evc_id,
         ce.evc_data,
-        ce.cli_id,
         ce.ope_id,
         op.ope_login,
         ROW_NUMBER() OVER (
@@ -345,50 +390,58 @@ base_acordo AS (
         a.aco_status,
         a.aco_tipo,
         a.aco_etl_alteracao,
-        pss.pes_nome,
-        pss.pes_cpfcnpj,
-        c.con_numero,
-        c.cre_id,
-        c.fil_id,
-        c.pro_id
+
+        COALESCE(pss.pes_nome, pss_nv.pes_nome) AS pes_nome,
+        COALESCE(pss.pes_cpfcnpj, pss_nv.pes_cpfcnpj) AS pes_cpfcnpj,
+
+        COALESCE(c.con_numero, c_nv.con_numero) AS con_numero,
+        COALESCE(c.cre_id, c_nv.cre_id) AS cre_id,
+        COALESCE(c.fil_id, c_nv.fil_id) AS fil_id,
+        COALESCE(c.pro_id, c_nv.pro_id) AS pro_id
     FROM dbo.tb_acordo a
-    INNER JOIN dbo.tb_acordo_parcela ap
+
+    LEFT JOIN dbo.tb_acordo_parcela ap
         ON ap.aco_id = a.aco_id
-    INNER JOIN dbo.tb_parcela p
+    LEFT JOIN dbo.tb_parcela p
         ON p.par_id = ap.par_id
-    INNER JOIN dbo.tb_negociacao n
+    LEFT JOIN dbo.tb_negociacao n
         ON n.neg_id = p.neg_id
-    INNER JOIN dbo.tb_contrato c
+    LEFT JOIN dbo.tb_contrato c
         ON c.con_id = n.con_id
-    INNER JOIN dbo.tb_cliente cl
+    LEFT JOIN dbo.tb_cliente cl
         ON cl.cli_id = c.cli_id
-    INNER JOIN dbo.tb_pessoa pss
+    LEFT JOIN dbo.tb_pessoa pss
         ON pss.pes_id = cl.cli_id
-),
-pagamentos_periodo AS (
-    SELECT
-        p.aco_id,
-        MIN(p.pgo_data) AS data_pagamento,
-        SUM(p.pgo_valor) AS valor_pago_periodo
-    FROM dbo.tb_pagamento p
-    WHERE p.pgo_data >= %s
-      AND p.pgo_data < DATEADD(DAY, 1, %s)
-      AND p.aco_id IS NOT NULL
-    GROUP BY p.aco_id
+
+    LEFT JOIN dbo.tb_negociacao_vinculo nv
+        ON nv.aco_id = a.aco_id
+    LEFT JOIN dbo.tb_negociacao n_nv
+        ON n_nv.neg_id = nv.neg_id
+    LEFT JOIN dbo.tb_contrato c_nv
+        ON c_nv.con_id = n_nv.con_id
+    LEFT JOIN dbo.tb_cliente cl_nv
+        ON cl_nv.cli_id = c_nv.cli_id
+    LEFT JOIN dbo.tb_pessoa pss_nv
+        ON pss_nv.pes_id = cl_nv.cli_id
 )
 SELECT
     'PAGAMENTO_EXTRA' AS origem_registro,
+
     b.aco_numero AS numero_acordo,
     b.aco_id AS aco_id,
     b.aco_data AS data_acordo,
+
     ev.evc_data AS data_emissao,
     pg.data_pagamento AS data_pagamento,
+
     b.aco_etl_alteracao AS data_etl_alteracao,
     b.pes_nome AS cliente,
     b.pes_cpfcnpj AS cpf_cnpj,
     b.con_numero AS contrato,
+
     cr.cre_id AS cre_id,
     cr.cre_sigla AS credor,
+
     CONCAT(
         COALESCE(cf.fil_codigo, ''),
         CASE
@@ -397,23 +450,32 @@ SELECT
         END,
         COALESCE(cf.fil_nome, '')
     ) AS filial,
+
     pr.pro_nome AS tipo_contrato,
-    STRING_AGG(ac_tipo.cca_valor, ' | ') AS tipo_negociacao,
+    CAST(NULL AS VARCHAR(255)) AS tipo_negociacao,
+
     b.aco_ho AS honorario_bruto,
     b.desconto_honorario AS desconto_honorario,
     b.aco_ho - b.desconto_honorario AS honorario_liquido,
+
     b.aco_num_parc AS qtd_parcelas_acordo,
     ast.aco_status_descricao AS status_acordo,
     b.aco_tipo AS tipo_acordo,
+
     ev.ope_login AS emitido_por_login,
     ev.ope_login AS emitido_por_nome,
-    pg.valor_pago_periodo AS valor_pago_periodo
+
+    CAST(1 AS DECIMAL(14,2)) AS valor_pago_periodo
+
 FROM pagamentos_periodo pg
 INNER JOIN base_acordo b
     ON b.aco_id = pg.aco_id
+CROSS JOIN periodo per
+
 LEFT JOIN evento_acordo ev
     ON ev.evc_id = b.aco_id
    AND ev.rn = 1
+
 LEFT JOIN dbo.tb_credor cr
     ON cr.cre_id = b.cre_id
 LEFT JOIN dbo.tb_credor_filial cf
@@ -422,41 +484,17 @@ LEFT JOIN dbo.tb_produto pr
     ON pr.pro_id = b.pro_id
 LEFT JOIN dbo.tb_acordo_status ast
     ON ast.aco_status = b.aco_status
-LEFT JOIN tipo_negociacao_campo tnc
-    ON 1 = 1
-LEFT JOIN dbo.tb_acordo_campo ac_tipo
-    ON ac_tipo.aco_id = b.aco_id
-   AND ac_tipo.cca_id = tnc.cca_id
-   AND ac_tipo.cca_valor IS NOT NULL
-WHERE NOT EXISTS (
-    SELECT 1
-    FROM evento_acordo ev2
-    WHERE ev2.evc_id = b.aco_id
-      AND ev2.rn = 1
-      AND ev2.evc_data >= %s
-      AND ev2.evc_data < DATEADD(DAY, 1, %s)
-)
-GROUP BY
-    b.aco_numero,
-    b.aco_id,
-    b.aco_data,
-    ev.evc_data,
-    pg.data_pagamento,
-    b.aco_etl_alteracao,
-    b.pes_nome,
-    b.pes_cpfcnpj,
-    b.con_numero,
-    cr.cre_id,
-    cr.cre_sigla,
-    cf.fil_codigo,
-    cf.fil_nome,
-    pr.pro_nome,
-    b.aco_ho,
-    b.desconto_honorario,
-    b.aco_num_parc,
-    ast.aco_status_descricao,
-    b.aco_tipo,
-    ev.ope_login,
-    pg.valor_pago_periodo
-ORDER BY pg.data_pagamento DESC
+
+WHERE pg.rn = 1
+  AND (
+      ev.evc_data IS NULL
+      OR NOT (
+          ev.evc_data >= per.data_ini
+          AND ev.evc_data < DATEADD(DAY, 1, per.data_fim)
+      )
+  )
+
+ORDER BY
+    pg.data_pagamento DESC,
+    b.aco_numero DESC
 """

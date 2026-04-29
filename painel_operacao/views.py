@@ -18,7 +18,7 @@ from .models import (
     PainelOperacaoRelatorioGeral,
     SupervisorPainel,
 )
-from .services import sincronizar_painel_operacao, sincronizar_relatorio_geral
+from .services import eh_status_pago, sincronizar_painel_operacao, sincronizar_relatorio_geral
 
 
 def zero_decimal(valor):
@@ -48,7 +48,7 @@ def data_comparacao(item):
 def classificar_item_painel(item):
     hoje = date.today()
 
-    if item.tem_pagamento:
+    if item.tem_pagamento or eh_status_pago(item.status_acordo):
         return "PAGO"
 
     if item.data_acordo and item.data_acordo.date() < hoje:
@@ -85,6 +85,18 @@ def pegar_mais_recente_itens(itens):
 
 
 def consolidar_itens_painel(itens):
+    """
+    Consolida acordos por contrato sem perder acordos pagos do mesmo mês.
+
+    Regra operacional atual:
+    - Vários PAGO no mesmo contrato/período: mantém todos.
+    - Vários A VENCER no mesmo contrato/período: mantém todos.
+    - Várias QUEBRA no mesmo contrato/período: mantém somente a quebra mais recente.
+    - PAGO mais recente que QUEBRA antiga: mantém somente os pagos.
+    - QUEBRA mais recente que o último PAGO: mantém todos os pagos + a quebra mais recente.
+    - A VENCER + QUEBRA, sem pago: mantém os A VENCER e ignora a quebra.
+    - PAGO + A VENCER: mantém todos os pagos + todos os A VENCER e ignora quebra antiga.
+    """
     grupos = {}
 
     for item in itens:
@@ -108,36 +120,31 @@ def consolidar_itens_painel(itens):
             else:
                 quebras.append(item)
 
-        pago_recente = pegar_mais_recente_itens(pagos)
-        avencer_recente = pegar_mais_recente_itens(avencers)
-        quebra_recente = pegar_mais_recente_itens(quebras)
+        pagos = sorted(pagos, key=lambda item: data_comparacao(item) or item.created_at, reverse=True)
+        avencers = sorted(avencers, key=lambda item: data_comparacao(item) or item.created_at, reverse=True)
+        quebras = sorted(quebras, key=lambda item: data_comparacao(item) or item.created_at, reverse=True)
 
-        if pago_recente and quebra_recente:
-            data_pago = data_comparacao(pago_recente) or pago_recente.created_at
-            data_quebra = data_comparacao(quebra_recente) or quebra_recente.created_at
+        quebra_recente = quebras[0] if quebras else None
 
-            if data_quebra > data_pago:
-                resultado.append(pago_recente)
-                resultado.append(quebra_recente)
-            else:
-                resultado.append(pago_recente)
+        # Se existe acordo A VENCER, ele representa negociação ativa/futura.
+        # Nesse cenário a quebra antiga do mesmo contrato não deve entrar no painel.
+        if avencers:
+            resultado.extend(pagos)
+            resultado.extend(avencers)
             continue
 
-        if avencer_recente and quebra_recente:
-            resultado.append(avencer_recente)
-            continue
+        if pagos:
+            resultado.extend(pagos)
 
-        if pago_recente and avencer_recente:
-            resultado.append(pago_recente)
-            resultado.append(avencer_recente)
-            continue
+            if quebra_recente:
+                ultimo_pago = pagos[0]
+                data_pago = data_comparacao(ultimo_pago) or ultimo_pago.created_at
+                data_quebra = data_comparacao(quebra_recente) or quebra_recente.created_at
 
-        if pago_recente:
-            resultado.append(pago_recente)
-            continue
+                # Quebra só entra junto se ela for posterior ao pagamento mais recente.
+                if data_quebra > data_pago:
+                    resultado.append(quebra_recente)
 
-        if avencer_recente:
-            resultado.append(avencer_recente)
             continue
 
         if quebra_recente:
@@ -145,7 +152,6 @@ def consolidar_itens_painel(itens):
             continue
 
     return resultado
-
 
 def calcular_valores_item(item):
     valor = zero_decimal(item.honorario_liquido)
@@ -386,8 +392,17 @@ def exportar_excel_view(request):
         })
 
     df_detalhado = pd.DataFrame(registros)
+    # 🔧 REMOVER TIMEZONE (CORREÇÃO DO ERRO EXCEL)
+    if not df_detalhado.empty:
+        for col in ["Data Referência", "Data Acordo", "Data Emissão"]:
+            if col in df_detalhado.columns:
+                df_detalhado[col] = pd.to_datetime(df_detalhado[col], errors="coerce")
 
-    totais = somar_itens(itens)
+                try:
+                    df_detalhado[col] = df_detalhado[col].dt.tz_localize(None)
+                except Exception:
+                    pass
+        totais = somar_itens(itens)
 
     df_resumo = pd.DataFrame([
         {
@@ -507,9 +522,12 @@ def atualizar_relatorio_geral_view(request):
 
     data_ini_str = request.POST.get("data_ini")
     data_fim_str = request.POST.get("data_fim")
+    supervisor = request.POST.get("supervisor") or ""
+    operador = request.POST.get("operador") or ""
+    credor = request.POST.get("credor") or ""
 
     try:
-        data_ini = date.fromisoformat(data_ini_str) if data_ini_str else date(2026, 4, 1)
+        data_ini = date.fromisoformat(data_ini_str) if data_ini_str else date.today()
         data_fim = date.fromisoformat(data_fim_str) if data_fim_str else date.today()
 
         resultado = sincronizar_relatorio_geral(
@@ -519,14 +537,24 @@ def atualizar_relatorio_geral_view(request):
 
         messages.success(
             request,
-            f"{resultado['mensagem']} | Período usado: {data_ini.strftime('%d/%m/%Y')} até {data_fim.strftime('%d/%m/%Y')}"
+            f"{resultado.get('mensagem', 'Relatório geral atualizado.')} | "
+            f"Período usado: {data_ini.strftime('%d/%m/%Y')} até {data_fim.strftime('%d/%m/%Y')}"
         )
 
     except Exception as e:
         messages.error(request, f"Erro ao atualizar relatório geral: {e}")
 
     url = reverse("painel_operacao:painel")
-    return redirect(f"{url}?data_ini={data_ini_str or '2026-04-01'}&data_fim={data_fim_str or date.today().isoformat()}")
+
+    params = (
+        f"?data_ini={data_ini_str or date.today().isoformat()}"
+        f"&data_fim={data_fim_str or date.today().isoformat()}"
+        f"&supervisor={supervisor}"
+        f"&operador={operador}"
+        f"&credor={credor}"
+    )
+
+    return redirect(f"{url}{params}")
 
 
 @login_required
@@ -584,7 +612,6 @@ def exportar_relatorio_geral_view(request):
             "supervisor_nome",
             "status_acordo",
             "honorario_liquido",
-            "valor_emissao",
             "valor_pago",
             "valor_avencer",
             "valor_quebra",
@@ -605,6 +632,15 @@ def exportar_relatorio_geral_view(request):
         if "data_referencia" in df.columns:
             df["data_referencia"] = pd.to_datetime(df["data_referencia"], errors="coerce")
 
+        def calcular_status_real(row):
+            if row.get("valor_pago", 0) and row.get("valor_pago", 0) > 0:
+                return "PAGO"
+            if row.get("valor_avencer", 0) and row.get("valor_avencer", 0) > 0:
+                return "AVENCER"
+            return "QUEBRA"
+
+        df["status_real"] = df.apply(calcular_status_real, axis=1)
+
         df = df.rename(columns={
             "origem_registro": "Origem",
             "data_referencia": "Data Referência",
@@ -624,11 +660,31 @@ def exportar_relatorio_geral_view(request):
             "supervisor_nome": "Supervisor",
             "status_acordo": "Status Acordo Original",
             "honorario_liquido": "Honorário Líquido",
-            "valor_emissao": "Emissão",
-            "valor_pago": "Pago",
-            "valor_avencer": "Avencer",
-            "valor_quebra": "Quebra",
+            "status_real": "Status Real",
         })
+
+        colunas_exportacao = [
+            "Origem",
+            "Status Real",
+            "Data Referência",
+            "Data Acordo",
+            "Data Emissão",
+            "Data Pagamento",
+            "Número Acordo",
+            "Aco ID",
+            "Cliente",
+            "CPF/CNPJ",
+            "Contrato",
+            "Credor",
+            "Filial",
+            "Tipo Contrato",
+            "Tipo Negociação",
+            "Operador",
+            "Supervisor",
+            "Status Acordo Original",
+            "Honorário Líquido",
+        ]
+        df = df[[col for col in colunas_exportacao if col in df.columns]]
 
     output = BytesIO()
 
@@ -652,7 +708,7 @@ def exportar_relatorio_geral_view(request):
                 largura = max(largura, min(45, int(df[col].astype(str).map(len).max()) + 2))
             worksheet.set_column(idx, idx, largura)
 
-        for col in ["Honorário Líquido", "Emissão", "Pago", "Avencer", "Quebra"]:
+        for col in ["Honorário Líquido"]:
             if col in df.columns:
                 idx = df.columns.get_loc(col)
                 worksheet.set_column(idx, idx, 16, formato_moeda)

@@ -35,93 +35,86 @@
     {% endif %}
 
     <div class="painel-filtros-card">
-    <form method="get" class="row g-3">
 
-        <div class="col-md-2">
-            <label class="form-label">Data inicial</label>
-            {{ form.data_ini }}
-        </div>
+        <form id="formFiltros" method="get" class="row g-3">
+            {% csrf_token %}
 
-        <div class="col-md-2">
-            <label class="form-label">Data final</label>
-            {{ form.data_fim }}
-        </div>
-
-        <div class="col-md-3">
-            <label class="form-label">Supervisor</label>
-            {{ form.supervisor }}
-        </div>
-
-        <div class="col-md-3">
-            <label class="form-label">Operador</label>
-            {{ form.operador }}
-        </div>
-
-        <div class="col-md-2">
-            <label class="form-label">Carteira</label>
-            {{ form.credor }}
-        </div>
-
-        <!-- LINHA DE BOTÕES -->
-        <div class="col-12">
-
-            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-
-                <!-- ESQUERDA -->
-                <div class="d-flex gap-2 flex-wrap">
-
-                    <button type="submit" class="btn btn-primary">
-                        Filtrar
-                    </button>
-
-                    <a href="{% url 'painel_operacao:painel' %}" class="btn btn-outline-secondary">
-                        Limpar
-                    </a>
-
-                    <a href="{% url 'painel_operacao:exportar_excel' %}?data_ini={{ form.data_ini.value|default:'' }}&data_fim={{ form.data_fim.value|default:'' }}"
-                       class="btn btn-success">
-                        Exportar Painel
-                    </a>
-
-                    <!-- RELATÓRIO -->
-                    <button form="formRelatorio" type="submit" class="btn btn-warning">
-                        Atualizar Relatório Geral
-                    </button>
-
-                    <a href="{% url 'painel_operacao:exportar_relatorio_geral' %}?data_ini={{ request.GET.data_ini|default:'' }}&data_fim={{ request.GET.data_fim|default:'' }}"
-                       class="btn btn-dark">
-                        Relatório Geral
-                    </a>
-
-                </div>
-
-                <!-- DIREITA -->
-                <div>
-                    <button form="formAtualizar" type="submit" class="btn btn-success px-4">
-                        Atualizar dados
-                    </button>
-                </div>
-
+            <div class="col-md-2">
+                <label class="form-label">Data inicial</label>
+                {{ form.data_ini }}
             </div>
 
-        </div>
+            <div class="col-md-2">
+                <label class="form-label">Data final</label>
+                {{ form.data_fim }}
+            </div>
 
-    </form>
+            <div class="col-md-3">
+                <label class="form-label">Supervisor</label>
+                {{ form.supervisor }}
+            </div>
 
-    <!-- FORM SEPARADO (correto) -->
-    <form id="formAtualizar" method="post" action="{% url 'painel_operacao:atualizar' %}">
-        {% csrf_token %}
-        <input type="hidden" name="data_ini" value="{{ request.GET.data_ini|default:'' }}">
-        <input type="hidden" name="data_fim" value="{{ request.GET.data_fim|default:'' }}">
-    </form>
+            <div class="col-md-3">
+                <label class="form-label">Operador</label>
+                {{ form.operador }}
+            </div>
 
-    <form id="formRelatorio" method="post" action="{% url 'painel_operacao:atualizar_relatorio_geral' %}">
-        {% csrf_token %}
-        <input type="hidden" name="data_ini" value="{{ request.GET.data_ini|default:'' }}">
-        <input type="hidden" name="data_fim" value="{{ request.GET.data_fim|default:'' }}">
-    </form>
+            <div class="col-md-2">
+                <label class="form-label">Carteira</label>
+                {{ form.credor }}
+            </div>
 
-</div>
+            <div class="col-12">
+                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+
+                    <div class="d-flex gap-2 flex-wrap">
+
+                        <button type="submit" class="btn btn-primary">
+                            Filtrar
+                        </button>
+
+                        <a href="{% url 'painel_operacao:painel' %}" class="btn btn-outline-secondary">
+                            Limpar
+                        </a>
+
+                        <button type="submit"
+                                formaction="{% url 'painel_operacao:exportar_excel' %}"
+                                formmethod="get"
+                                class="btn btn-success">
+                            Exportar Painel
+                        </button>
+
+                        <button type="submit"
+                                formaction="{% url 'painel_operacao:atualizar_relatorio_geral' %}"
+                                formmethod="post"
+                                class="btn btn-warning">
+                            Atualizar Relatório Geral
+                        </button>
+
+                        <button type="submit"
+                                formaction="{% url 'painel_operacao:exportar_relatorio_geral' %}"
+                                formmethod="get"
+                                class="btn btn-dark">
+                            Relatório Geral
+                        </button>
+
+                    </div>
+
+                    <div>
+                        <button type="submit"
+                                formaction="{% url 'painel_operacao:atualizar' %}"
+                                formmethod="post"
+                                class="btn btn-success px-4">
+                            Atualizar dados
+                        </button>
+                    </div>
+
+                </div>
+            </div>
+
+        </form>
+
+    </div>
 
     <div class="kpis-grid">
         <div class="kpi-card kpi-emissao">

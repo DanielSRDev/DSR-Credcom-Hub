@@ -1,3 +1,5 @@
+from datetime import date
+
 from django.core.management.base import BaseCommand
 from painel_operacao.services import (
     sincronizar_painel_operacao,
@@ -13,8 +15,8 @@ class Command(BaseCommand):
         parser.add_argument("--data-fim", required=True, type=str)
 
     def handle(self, *args, **options):
-        data_ini = options["data_ini"]
-        data_fim = options["data_fim"]
+        data_ini = date.fromisoformat(options["data_ini"])
+        data_fim = date.fromisoformat(options["data_fim"])
 
         self.stdout.write(self.style.WARNING("🔄 Iniciando atualização completa..."))
 
