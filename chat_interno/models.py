@@ -44,15 +44,37 @@ class Message(models.Model):
 
 class ChatVinculoOperador(models.Model):
     """
-    OPERACAO -> Supervisor responsável.
+    Vínculo OPERACAO -> Supervisor(es) responsável(is).
+
+    Um operador pode ter múltiplos supervisores vinculados.
+    A unicidade é garantida pelo par (operador, supervisor),
+    impedindo vínculos duplicados para o mesmo par.
     """
-    operador = models.OneToOneField(User, on_delete=models.CASCADE, related_name="chat_vinculo_operador")
-    supervisor = models.ForeignKey(User, on_delete=models.CASCADE, related_name="chat_supervisionados")
+    operador = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="chat_vinculos_operador",   # era: chat_vinculo_operador (OneToOne)
+    )
+    supervisor = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="chat_supervisionados",
+    )
     criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["operador", "supervisor"],
+                name="uniq_chat_vinculo_operador_supervisor",
+            ),
+        ]
+        verbose_name = "Vínculo operador-supervisor"
+        verbose_name_plural = "Vínculos operador-supervisor"
 
     def __str__(self):
         return f"{self.operador} -> {self.supervisor}"
-    
+
 
 class ChatPresence(models.Model):
 
@@ -74,7 +96,6 @@ class ChatPresence(models.Model):
     )
 
     updated_at = models.DateTimeField(auto_now=True)
-
 
 
 class ChatMonitorConfig(models.Model):

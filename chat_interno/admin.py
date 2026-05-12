@@ -102,6 +102,32 @@ class ChatMonitorConfigInline(admin.StackedInline):
     extra = 0
 
 
+class ChatVinculoOperadorInline(admin.TabularInline):
+    """
+    Inline para gerenciar os vínculos operador -> supervisor(es)
+    diretamente na página do usuário no admin.
+
+    Usa TabularInline (em vez do antigo StackedInline via OneToOne)
+    porque agora um operador pode ter múltiplos supervisores.
+
+    fk_name="operador" é obrigatório: o model tem duas FKs para User
+    (operador e supervisor), então o Django precisa saber qual delas
+    âncora o inline ao usuário que está sendo editado.
+
+    raw_id_fields no lugar de autocomplete_fields: o autocomplete exige
+    que o ModelAdmin do User referenciado exponha search_fields de forma
+    validada pelo Django — a cadeia unregister+register customizado
+    pode quebrar essa validação e suprimir o botão "Adicionar outro".
+    raw_id_fields é mais robusto e sempre renderiza o botão corretamente.
+    """
+    model = ChatVinculoOperador
+    fk_name = "operador"
+    extra = 1
+    verbose_name = "Supervisor vinculado"
+    verbose_name_plural = "Supervisores vinculados"
+    raw_id_fields = ["supervisor"]
+
+
 try:
     admin.site.unregister(User)
 except admin.sites.NotRegistered:
@@ -110,4 +136,4 @@ except admin.sites.NotRegistered:
 
 @admin.register(User)
 class CustomUserAdmin(DjangoUserAdmin):
-    inlines = [ChatMonitorConfigInline]
+    inlines = [ChatMonitorConfigInline, ChatVinculoOperadorInline]

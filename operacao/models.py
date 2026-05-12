@@ -2,19 +2,27 @@ from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
+
 class TarefaManager(models.Manager):
     def get_queryset(self):
         return super().get_queryset().filter(deleted_at__isnull=True)
+
 
 class Equipe(models.Model):
     nome = models.CharField(max_length=80)
     ativa = models.BooleanField(default=True)
 
-    supervisor = models.ForeignKey(
+    # Era: supervisor = ForeignKey (um único supervisor por equipe)
+    # Agora: ManyToManyField — uma equipe pode ter múltiplos supervisores.
+    # O related_name "operacao_equipes_supervisionadas" é mantido igual
+    # para não quebrar nenhuma query existente nas views.
+    supervisores = models.ManyToManyField(
         settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
+        blank=True,
         related_name="operacao_equipes_supervisionadas",
+        verbose_name="Supervisores",
     )
+
     membros = models.ManyToManyField(
         settings.AUTH_USER_MODEL,
         blank=True,
@@ -26,7 +34,13 @@ class Equipe(models.Model):
         verbose_name_plural = "Equipes (Operação)"
 
     def __str__(self):
-        return f"{self.nome} (Supervisor: {getattr(self.supervisor, 'username', '-')})"
+        # Com ManyToMany não existe self.supervisor.username direto.
+        # Monta a lista de usernames dos supervisores para o __str__.
+        # Usa all() com values_list para evitar N+1 em listagens do admin.
+        nomes = ", ".join(
+            self.supervisores.values_list("username", flat=True)
+        ) or "-"
+        return f"{self.nome} (Supervisores: {nomes})"
 
 
 class Tarefa(models.Model):
@@ -60,7 +74,6 @@ class Tarefa(models.Model):
     prioridade = models.BooleanField(default=False)
     ordem = models.PositiveIntegerField(default=0)
 
-    # executor = quem marcou EXECUTANDO (pegou o chamado)
     executor = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -92,9 +105,8 @@ class Tarefa(models.Model):
             return False
         delta = self.prazo - timezone.now()
         return 0 < delta.total_seconds() <= 24 * 3600
-    # -----------------------
+
     # Lixeira (soft delete)
-    # -----------------------
     deleted_at = models.DateTimeField(null=True, blank=True)
     deleted_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -103,9 +115,7 @@ class Tarefa(models.Model):
         related_name="operacao_tarefas_deletadas",
     )
 
-    # Por padrão, o sistema só enxerga NÃO deletadas
     objects = TarefaManager()
-    # Para o admin ver TUDO (inclusive deletadas)
     all_objects = models.Manager()
 
     def soft_delete(self, user=None):
@@ -119,6 +129,7 @@ class Tarefa(models.Model):
         self.deleted_at = None
         self.deleted_by = None
         self.save(update_fields=["deleted_at", "deleted_by"])
+
 
 class Comentario(models.Model):
     tarefa = models.ForeignKey(Tarefa, on_delete=models.CASCADE, related_name="comentarios")
@@ -162,7 +173,7 @@ class Anexo(models.Model):
 
     def __str__(self):
         return f"Anexo {self.id} - Tarefa {self.tarefa_id}"
-    
+
 
 class OperacaoPermissaoUsuario(models.Model):
     user = models.OneToOneField(
@@ -183,5 +194,3 @@ class OperacaoPermissaoUsuario(models.Model):
     def __str__(self):
         status = "SIM" if self.pode_criar_chamado_supervisor else "NÃO"
         return f"{self.user.username} - criar chamado: {status}"
-
-

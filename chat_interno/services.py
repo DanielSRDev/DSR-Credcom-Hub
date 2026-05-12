@@ -21,10 +21,11 @@ def _in_group(user, name: str) -> bool:
 
 def allowed_contacts(user):
     """
-    Regras:
-    - Coordenação: fala com todos
-    - Supervisor: fala com equipe + supervisores + coordenação
-    - Operação: fala só com supervisor + coordenação
+    Regras de contato:
+    - Coordenação: fala com todos.
+    - Supervisor: fala com outros supervisores + coordenação + sua equipe vinculada.
+    - Operação: fala com TODOS os seus supervisores vinculados + coordenação.
+                Se não tiver nenhum vínculo, fala apenas com a coordenação.
     """
     qs = User.objects.filter(is_active=True).exclude(id=user.id)
 
@@ -45,13 +46,20 @@ def allowed_contacts(user):
         ).distinct()
 
     if is_oper:
-        vinc = ChatVinculoOperador.objects.filter(operador=user).first()
         coord_ids = User.objects.filter(groups__name="OPERACAO_CORDENACAO").values_list("id", flat=True)
 
-        if not vinc:
+        # Busca TODOS os supervisores vinculados ao operador (era .first() antes)
+        supervisor_ids = ChatVinculoOperador.objects.filter(
+            operador=user
+        ).values_list("supervisor_id", flat=True)
+
+        if not supervisor_ids:
+            # Sem vínculo algum: acessa apenas coordenação
             return qs.filter(id__in=coord_ids)
 
-        return qs.filter(Q(id=vinc.supervisor_id) | Q(id__in=coord_ids)).distinct()
+        return qs.filter(
+            Q(id__in=supervisor_ids) | Q(id__in=coord_ids)
+        ).distinct()
 
     return qs.none()
 

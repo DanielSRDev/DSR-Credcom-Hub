@@ -23,7 +23,6 @@ from .models import Tarefa, Equipe, Comentario, Anexo, OperacaoPermissaoUsuario
 def _in_group(user, group_name: str) -> bool:
     if not user.is_authenticated:
         return False
-    # se quiser, pode tirar staff daqui. mas vou manter como "admin" interno
     if user.is_superuser or user.is_staff:
         return True
     return user.groups.filter(name=group_name).exists()
@@ -34,7 +33,6 @@ def is_coord(user) -> bool:
 
 
 def is_supervisor(user) -> bool:
-    # supervisor (limitado à equipe). coord também é "acima"
     return _in_group(user, "OPERACAO_SUPERVISOR") or is_coord(user)
 
 
@@ -46,18 +44,26 @@ def membros_da_equipe_do_supervisor(user):
     """
     Retorna Users que são membros das equipes onde user é supervisor.
 
-    Seu erro mostrou que o related_name correto NO User é:
-      - operacao_equipes
-    E supervisor provavelmente tem:
-      - operacao_equipes_supervisionadas (no FK supervisor)
+    Alterado: o campo supervisor (ForeignKey) foi convertido para
+    supervisores (ManyToManyField), então o lookup passa de:
+        operacao_equipes__supervisor=user
+    para:
+        operacao_equipes__supervisores=user
+
+    O related_name "operacao_equipes" no campo membros não mudou,
+    então a travessia da relação continua igual — só o campo final muda.
+
+    Com ManyToMany um supervisor pode estar em várias equipes, e esta
+    função já retorna .distinct() para evitar duplicatas no queryset.
     """
-    return User.objects.filter(operacao_equipes__supervisor=user).distinct()
+    return User.objects.filter(operacao_equipes__supervisores=user).distinct()
 
 
 def queryset_visivel_para(user):
     """
     Coordenação: vê tudo.
-    Supervisor: vê tarefas atribuídas aos membros da equipe dele (e ele mesmo).
+    Supervisor: vê tarefas atribuídas aos membros de TODAS as equipes
+                que ele supervisiona (e ele mesmo).
     Operador: vê tarefas atribuídas a ele e também as que ele criou.
     """
     if is_coord(user):
@@ -143,7 +149,7 @@ def quadro(request):
     executando = qs.filter(status="executando").order_by("-prioridade", "prazo", "-iniciado_em")
     executado = qs.filter(status="executado").order_by("-prioridade", "-executado_em", "prazo")
 
-    # FINALIZADAS (sem atualizado_em!)
+    # FINALIZADAS
     finalizadas_qs = qs.filter(status="feita")
     agora = timezone.now()
     if final == "hoje":
@@ -206,7 +212,6 @@ def tarefa_criar(request):
             tarefa = form.save(commit=False)
             tarefa.criada_por = request.user
 
-            # ordem: joga no final das abertas
             max_ordem = Tarefa.objects.filter(status="aberta").aggregate(m=Max("ordem"))["m"] or 0
             tarefa.ordem = max_ordem + 1
             tarefa.save()
@@ -278,7 +283,6 @@ def toggle_prioridade(request, tarefa_id: int):
 def marcar_executando(request, tarefa_id: int):
     tarefa = get_object_or_404(queryset_visivel_para(request.user), id=tarefa_id)
 
-    # responsável ou gestor
     if not (request.user.id == tarefa.atribuida_para_id or is_supervisor(request.user) or is_coord(request.user)):
         return HttpResponseForbidden("Você não pode iniciar esse chamado.")
 
@@ -296,7 +300,6 @@ def marcar_executando(request, tarefa_id: int):
 def marcar_executado(request, tarefa_id: int):
     tarefa = get_object_or_404(queryset_visivel_para(request.user), id=tarefa_id)
 
-    # executor ou gestor
     if not (request.user.id == tarefa.executor_id or is_supervisor(request.user) or is_coord(request.user)):
         return HttpResponseForbidden("Você não pode marcar como executado.")
 
@@ -312,7 +315,6 @@ def marcar_executado(request, tarefa_id: int):
 def finalizar_reabrir(request, tarefa_id: int):
     tarefa = get_object_or_404(queryset_visivel_para(request.user), id=tarefa_id)
 
-    # só criador OU coordenação
     if not (request.user.id == tarefa.criada_por_id or is_coord(request.user)):
         return HttpResponseForbidden("Somente o criador ou coordenação pode finalizar/reabrir.")
 
@@ -403,7 +405,6 @@ def anexo_upload(request, tarefa_id: int):
 def anexo_download(request, anexo_id: int):
     a = get_object_or_404(Anexo.objects.select_related("tarefa"), id=anexo_id)
 
-    # segurança: só baixa se a tarefa for visível pro user
     get_object_or_404(queryset_visivel_para(request.user), id=a.tarefa_id)
 
     if not a.arquivo:
