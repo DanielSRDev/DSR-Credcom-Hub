@@ -1,28 +1,71 @@
 from datetime import date
 from decimal import Decimal
 from io import BytesIO
+import re
 
 import pandas as pd
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db.models import Sum
-from django.http import HttpResponse
+from django.http import HttpResponse, HttpResponseForbidden
 from django.shortcuts import redirect, render
 from django.urls import reverse
 
-from .forms import PainelOperacaoFiltroForm
+from .forms import AcompanhamentoGeralFiltroForm, PainelOperacaoFiltroForm
 from .models import (
     CarteiraSupervisor,
+    MetaOperadorCarteira,
     PainelConfiguracao,
     PainelOperacaoRegistro,
     PainelOperacaoRelatorioGeral,
     SupervisorPainel,
 )
 from .services import eh_status_pago, sincronizar_painel_operacao, sincronizar_relatorio_geral
+from .services_acompanhamento import montar_acompanhamento_geral
+
+
+
+GRUPOS_ACOMPANHAMENTO_GERAL = {
+    "GESTAO",
+    "GESTAO_GESTOR",
+    "GESTAO_GESTORA",
+    "GESTAO_USUARIO",
+    "OPERACAO_CORDENACAO",
+    "OPERACAO_SUPERVISOR",
+    "SUPERVISAO",
+    "SUPERVISÃO",
+    "COORDENACAO",
+    "COORDENAÇÃO",
+    "SUPERVISOR",
+}
+
+
+def pode_acessar_acompanhamento_geral(user):
+    if not user or not user.is_authenticated:
+        return False
+
+    if user.is_superuser:
+        return True
+
+    return user.groups.filter(name__in=GRUPOS_ACOMPANHAMENTO_GERAL).exists()
 
 
 def zero_decimal(valor):
     return valor or Decimal("0.00")
+
+
+def limpar_filial_exportacao(valor):
+    """Remove o código operacional da filial na exportação.
+
+    Exemplo:
+    "VB29 - Residencial Drª Zélia Nunes" -> "Residencial Drª Zélia Nunes"
+    """
+    texto = str(valor or "").strip()
+
+    if not texto:
+        return ""
+
+    return re.sub(r"^VB\s*\d+\s*(?:[-–—]\s*)?", "", texto, flags=re.IGNORECASE).strip()
 
 
 def faixa_operador_classe(valor):
@@ -347,6 +390,7 @@ def painel_view(request):
         "config": config,
         "resumo_supervisores": resumo_supervisores,
         "ranking_operadores": ranking_operadores,
+        "pode_ver_acompanhamento_geral": pode_acessar_acompanhamento_geral(request.user),
     }
 
     return render(request, "painel_operacao/painel.html", context)
@@ -375,7 +419,7 @@ def exportar_excel_view(request):
             "Contrato": item.contrato,
             "Credor ID": item.cre_id,
             "Credor": item.credor,
-            "Filial": item.filial,
+            "Filial": limpar_filial_exportacao(item.filial),
             "Tipo Contrato": item.tipo_contrato,
             "Tipo Negociação": item.tipo_negociacao,
             "Operador": item.emitido_por_nome,
@@ -601,9 +645,11 @@ def exportar_relatorio_geral_view(request):
             "data_pagamento",
             "numero_acordo",
             "aco_id",
+            "con_id",
             "cliente",
             "cpf_cnpj",
             "contrato",
+            "cre_id",
             "credor",
             "filial",
             "tipo_contrato",
@@ -611,10 +657,18 @@ def exportar_relatorio_geral_view(request):
             "emitido_por_nome",
             "supervisor_nome",
             "status_acordo",
+            "principal_liquido",
+            "multa_liquida",
+            "juros_liquido",
+            "valor_parcela",
             "honorario_liquido",
+            "despesa_liquida",
+            "valor_total_acordo",
+            "valor_pagamento_periodo",
             "valor_pago",
             "valor_avencer",
             "valor_quebra",
+            "observacao_contrato",
         )
     )
 
@@ -632,6 +686,9 @@ def exportar_relatorio_geral_view(request):
         if "data_referencia" in df.columns:
             df["data_referencia"] = pd.to_datetime(df["data_referencia"], errors="coerce")
 
+        if "filial" in df.columns:
+            df["filial"] = df["filial"].apply(limpar_filial_exportacao)
+
         def calcular_status_real(row):
             if row.get("valor_pago", 0) and row.get("valor_pago", 0) > 0:
                 return "PAGO"
@@ -641,48 +698,74 @@ def exportar_relatorio_geral_view(request):
 
         df["status_real"] = df.apply(calcular_status_real, axis=1)
 
+        valor_pagamento = pd.to_numeric(df.get("valor_pagamento_periodo", 0), errors="coerce").fillna(0)
+        valor_parcela_base = pd.to_numeric(df.get("valor_parcela", 0), errors="coerce").fillna(0)
+        honorario_liquido = pd.to_numeric(df.get("honorario_liquido", 0), errors="coerce").fillna(0)
+        despesa_liquida = pd.to_numeric(df.get("despesa_liquida", 0), errors="coerce").fillna(0)
+
+        # Regra nova:
+        # Valor Parcela = valor do pagamento - H.O. - despesa.
+        # Se a linha não tiver valor real de pagamento salvo, mantém a base antiga
+        # principal + multa + juros para não gerar parcela negativa em AVENCER/QUEBRA.
+        df["valor_parcela_exportacao"] = valor_parcela_base
+        tem_pagamento_real = valor_pagamento > 0
+        df.loc[tem_pagamento_real, "valor_parcela_exportacao"] = (
+            valor_pagamento[tem_pagamento_real]
+            - honorario_liquido[tem_pagamento_real]
+            - despesa_liquida[tem_pagamento_real]
+        )
+
+        df["observacao_contrato"] = df.get("observacao_contrato", "")
+        df["valor_recuperado_parcelamento"] = ""
+        df["valor_recuperado_refinanciamento"] = ""
+
         df = df.rename(columns={
-            "origem_registro": "Origem",
-            "data_referencia": "Data Referência",
-            "data_acordo": "Data Acordo",
-            "data_emissao": "Data Emissão",
-            "data_pagamento": "Data Pagamento",
-            "numero_acordo": "Número Acordo",
-            "aco_id": "Aco ID",
-            "cliente": "Cliente",
+            "cre_id": "Cód. Contratante",
+            "credor": "Contratante",
+            "emitido_por_nome": "Nome Cobrador",
             "cpf_cnpj": "CPF/CNPJ",
-            "contrato": "Contrato",
-            "credor": "Credor",
-            "filial": "Filial",
-            "tipo_contrato": "Tipo Contrato",
-            "tipo_negociacao": "Tipo Negociação",
-            "emitido_por_nome": "Operador",
-            "supervisor_nome": "Supervisor",
-            "status_acordo": "Status Acordo Original",
-            "honorario_liquido": "Honorário Líquido",
-            "status_real": "Status Real",
+            "cliente": "Nome do Cliente",
+            "filial": "Empreendimento",
+            "observacao_contrato": "Observação do Contrato",
+            "con_id": "Contrato ID",
+            "contrato": "Nr Contrato",
+            "tipo_contrato": "Tipo do Contrato",
+            "numero_acordo": "Nr Acordo",
+            "tipo_negociacao": "Tipo de Negociação",
+            "data_acordo": "Data Acordo",
+            "status_real": "Status",
+            "honorario_liquido": "Vlr. Honorário Acordo",
+            "valor_total_acordo": "Vlr. Total Acordo",
+            "valor_parcela_exportacao": "Valor Parcela",
+            "valor_recuperado_parcelamento": "Valor Recuperado Parcelamento",
+            "valor_recuperado_refinanciamento": "Valor Recuperado Refinanciamento",
+            "data_pagamento": "Data Pagto Parcela",
         })
 
+        df["Data Vecto Parcela"] = df["Data Acordo"] if "Data Acordo" in df.columns else ""
+
         colunas_exportacao = [
-            "Origem",
-            "Status Real",
-            "Data Referência",
-            "Data Acordo",
-            "Data Emissão",
-            "Data Pagamento",
-            "Número Acordo",
-            "Aco ID",
-            "Cliente",
+            "Cód. Contratante",
+            "Contratante",
+            "Nome Cobrador",
             "CPF/CNPJ",
-            "Contrato",
-            "Credor",
-            "Filial",
-            "Tipo Contrato",
-            "Tipo Negociação",
-            "Operador",
-            "Supervisor",
-            "Status Acordo Original",
-            "Honorário Líquido",
+            "Nome do Cliente",
+            "Empreendimento",
+            "Observação do Contrato",
+            "Contrato ID",
+            "Nr Contrato",
+            "Tipo do Contrato",
+            "Nr Acordo",
+            "Tipo de Negociação",
+            "Data Acordo",
+            "Status",
+            "Vlr. Honorário Acordo",
+            "Vlr. Total Acordo",
+            "Valor Parcela",
+            "Valor Recuperado Parcelamento",
+            "Valor Recuperado Refinanciamento",
+            "Data Vecto Parcela",
+            "Data Pagto Parcela",
         ]
         df = df[[col for col in colunas_exportacao if col in df.columns]]
 
@@ -708,17 +791,21 @@ def exportar_relatorio_geral_view(request):
                 largura = max(largura, min(45, int(df[col].astype(str).map(len).max()) + 2))
             worksheet.set_column(idx, idx, largura)
 
-        for col in ["Honorário Líquido"]:
+        for col in [
+            "Vlr. Honorário Acordo",
+            "Vlr. Total Acordo",
+            "Valor Parcela",
+        ]:
             if col in df.columns:
                 idx = df.columns.get_loc(col)
-                worksheet.set_column(idx, idx, 16, formato_moeda)
+                worksheet.set_column(idx, idx, 18, formato_moeda)
 
-        for col in ["Data Referência"]:
+        for col in ["Data Acordo", "Data Vecto Parcela"]:
             if col in df.columns:
                 idx = df.columns.get_loc(col)
-                worksheet.set_column(idx, idx, 14, formato_data)
+                worksheet.set_column(idx, idx, 16, formato_data)
 
-        for col in ["Data Acordo", "Data Emissão", "Data Pagamento"]:
+        for col in ["Data Pagto Parcela"]:
             if col in df.columns:
                 idx = df.columns.get_loc(col)
                 worksheet.set_column(idx, idx, 18, formato_datetime)
@@ -733,7 +820,6 @@ def exportar_relatorio_geral_view(request):
     )
     response["Content-Disposition"] = f'attachment; filename="{nome_arquivo}"'
     return response
-
 
 @login_required
 def config_view(request):
@@ -767,3 +853,289 @@ def atualizar_view(request):
 
     url = reverse("painel_operacao:painel")
     return redirect(f"{url}?data_ini={data_ini_str or '2026-04-01'}&data_fim={data_fim_str or date.today().isoformat()}")
+
+def aplicar_filtros_acompanhamento(request):
+    hoje = date.today()
+    dados_iniciais = {
+        "data_ini": request.GET.get("data_ini") or date(hoje.year, hoje.month, 1),
+        "data_fim": request.GET.get("data_fim") or hoje,
+        "supervisor": request.GET.get("supervisor") or "",
+        "operador": request.GET.get("operador") or "",
+        "credor": request.GET.get("credor") or "",
+    }
+
+    form = AcompanhamentoGeralFiltroForm(dados_iniciais or None)
+
+    data_ini = date(hoje.year, hoje.month, 1)
+    data_fim = hoje
+    supervisor = None
+    operador = ""
+    credor = ""
+
+    if form.is_valid():
+        data_ini = form.cleaned_data.get("data_ini") or data_ini
+        data_fim = form.cleaned_data.get("data_fim") or data_fim
+        supervisor = form.cleaned_data.get("supervisor")
+        operador = form.cleaned_data.get("operador") or ""
+        credor = form.cleaned_data.get("credor") or ""
+
+    return {
+        "form": form,
+        "data_ini": data_ini,
+        "data_fim": data_fim,
+        "supervisor": supervisor,
+        "operador": operador,
+        "credor": credor,
+    }
+
+
+@login_required
+def acompanhamento_geral_view(request):
+    if not pode_acessar_acompanhamento_geral(request.user):
+        return HttpResponseForbidden("Você não tem permissão para acessar o Acompanhamento Geral.")
+
+    filtros = aplicar_filtros_acompanhamento(request)
+
+    dados = montar_acompanhamento_geral(
+        data_ini=filtros["data_ini"],
+        data_fim=filtros["data_fim"],
+        supervisor=filtros["supervisor"],
+        operador=filtros["operador"],
+        credor=filtros["credor"],
+    )
+
+    context = {
+        "form": filtros["form"],
+        "data_ini": filtros["data_ini"],
+        "data_fim": filtros["data_fim"],
+        "resumo": dados["resumo"],
+        "supervisores": dados["supervisores"],
+        "operadores": dados["operadores"],
+        "operador_carteira": dados["operador_carteira"],
+    }
+
+    return render(request, "painel_operacao/acompanhamento_geral.html", context)
+
+
+@login_required
+def exportar_acompanhamento_geral_view(request):
+    if not pode_acessar_acompanhamento_geral(request.user):
+        return HttpResponseForbidden("Você não tem permissão para exportar o Acompanhamento Geral.")
+
+    filtros = aplicar_filtros_acompanhamento(request)
+
+    dados = montar_acompanhamento_geral(
+        data_ini=filtros["data_ini"],
+        data_fim=filtros["data_fim"],
+        supervisor=filtros["supervisor"],
+        operador=filtros["operador"],
+        credor=filtros["credor"],
+    )
+
+    resumo = dados["resumo"]
+
+    df_resumo = pd.DataFrame([
+        {
+            "Data Inicial": filtros["data_ini"],
+            "Data Final": filtros["data_fim"],
+            "Mês Meta": resumo["mes_meta"],
+            "Ano Meta": resumo["ano_meta"],
+            "Meta Geral": float(resumo["meta_geral"]),
+            "Faltante para Meta": float(resumo["faltante_geral"]),
+            "Excedente": float(resumo["excedente_geral"]),
+            "% Meta": float(resumo["pct_meta_geral"]),
+            "Emissão": float(resumo["emissao"]),
+            "Pago": float(resumo["pago"]),
+            "A Vencer": float(resumo["avencer"]),
+            "Quebra": float(resumo["quebra"]),
+            "% Pago": float(resumo["pct_pago"]),
+            "% A Vencer": float(resumo["pct_avencer"]),
+            "% Quebra": float(resumo["pct_quebra"]),
+            "Qtd Registros": resumo["qtd_registros"],
+            "Qtd Metas": resumo["qtd_metas"],
+        }
+    ])
+
+    df_supervisores = pd.DataFrame([
+        {
+            "Supervisor": item["supervisor"],
+            "Meta": float(item["meta"]),
+            "Emissão": float(item["emissao"]),
+            "Pago": float(item["pago"]),
+            "A Vencer": float(item["avencer"]),
+            "Quebra": float(item["quebra"]),
+            "Faltante": float(item["faltante"]),
+            "Excedente": float(item["excedente"]),
+            "% Meta": float(item["pct_meta"]),
+            "Qtd Registros": item["qtd"],
+        }
+        for item in dados["supervisores"]
+    ])
+
+    df_operadores = pd.DataFrame([
+        {
+            "Operador": item["operador"],
+            "Login": item["login"],
+            "Supervisor": item["supervisor"],
+            "Meta": float(item["meta"]),
+            "Emissão": float(item["emissao"]),
+            "Pago": float(item["pago"]),
+            "A Vencer": float(item["avencer"]),
+            "Quebra": float(item["quebra"]),
+            "Faltante": float(item["faltante"]),
+            "Excedente": float(item["excedente"]),
+            "% Meta": float(item["pct_meta"]),
+            "Qtd Registros": item["qtd"],
+        }
+        for item in dados["operadores"]
+    ])
+
+    df_operador_carteira = pd.DataFrame([
+        {
+            "Operador": item["operador"],
+            "Login": item["login"],
+            "Supervisor": item["supervisor"],
+            "Credor ID": item["cre_id"],
+            "Carteira": item["credor"],
+            "Meta": float(item["meta"]),
+            "Emissão": float(item["emissao"]),
+            "Pago": float(item["pago"]),
+            "A Vencer": float(item["avencer"]),
+            "Quebra": float(item["quebra"]),
+            "Faltante": float(item["faltante"]),
+            "Excedente": float(item["excedente"]),
+            "% Meta": float(item["pct_meta"]),
+            "Qtd Registros": item["qtd"],
+        }
+        for item in dados["operador_carteira"]
+    ])
+
+    df_metas = pd.DataFrame([
+        {
+            "Ano": meta.ano,
+            "Mês": meta.mes,
+            "Supervisor": meta.carteira.supervisor.nome if meta.carteira and meta.carteira.supervisor else "",
+            "Credor ID": meta.carteira.cre_id if meta.carteira else "",
+            "Carteira": meta.carteira.credor_nome if meta.carteira else "",
+            "Operador": meta.operador_nome,
+            "Login": meta.operador_login,
+            "Meta Mensal": float(meta.meta_mensal),
+            "Ativo": meta.ativo,
+        }
+        for meta in dados["metas"]
+    ])
+
+    registros_detalhados = []
+    for item in dados["queryset"]:
+        status_real = "PAGO" if zero_decimal(item.valor_pago) > 0 else "AVENCER" if zero_decimal(item.valor_avencer) > 0 else "QUEBRA"
+        registros_detalhados.append({
+            "Origem": item.origem_registro,
+            "Status Real": status_real,
+            "Data Referência": item.data_referencia,
+            "Data Acordo": item.data_acordo,
+            "Data Emissão": item.data_emissao,
+            "Data Pagamento": item.data_pagamento,
+            "Número Acordo": item.numero_acordo,
+            "Aco ID": item.aco_id,
+            "Cliente": item.cliente,
+            "CPF/CNPJ": item.cpf_cnpj,
+            "Contrato": item.contrato,
+            "Credor ID": item.cre_id,
+            "Credor": item.credor,
+            "Filial": limpar_filial_exportacao(item.filial),
+            "Tipo Contrato": item.tipo_contrato,
+            "Tipo Negociação": item.tipo_negociacao,
+            "Operador": item.emitido_por_nome,
+            "Login Operador": item.emitido_por_login,
+            "Supervisor": item.supervisor_nome,
+            "Status Acordo Original": item.status_acordo,
+            "Principal Líquido": float(item.principal_liquido),
+            "Multa Líquida": float(item.multa_liquida),
+            "Juros Líquido": float(item.juros_liquido),
+            "Valor Parcela": float(item.valor_parcela),
+            "Honorário Líquido": float(item.honorario_liquido),
+            "Vlr. Total Acordo": float(item.valor_total_acordo),
+            "Emissão": float(item.valor_emissao),
+            "Pago": float(item.valor_pago),
+            "A Vencer": float(item.valor_avencer),
+            "Quebra": float(item.valor_quebra),
+        })
+
+    df_detalhado = pd.DataFrame(registros_detalhados)
+
+    for df in [df_resumo, df_detalhado]:
+        if not df.empty:
+            for col in ["Data Inicial", "Data Final", "Data Referência", "Data Acordo", "Data Emissão", "Data Pagamento"]:
+                if col in df.columns:
+                    df[col] = pd.to_datetime(df[col], errors="coerce")
+                    try:
+                        df[col] = df[col].dt.tz_localize(None)
+                    except Exception:
+                        pass
+
+    output = BytesIO()
+
+    abas = {
+        "Resumo Geral": df_resumo,
+        "Supervisores": df_supervisores,
+        "Operadores": df_operadores,
+        "Operador Carteira": df_operador_carteira,
+        "Metas": df_metas,
+        "Detalhado": df_detalhado,
+    }
+
+    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+        for nome_aba, df in abas.items():
+            df.to_excel(writer, sheet_name=nome_aba, index=False)
+
+        workbook = writer.book
+        formato_moeda = workbook.add_format({"num_format": 'R$ #,##0.00'})
+        formato_percentual = workbook.add_format({"num_format": '0.00%'})
+        formato_cabecalho = workbook.add_format({"bold": True, "bg_color": "#D9EAF7", "border": 1})
+        formato_data = workbook.add_format({"num_format": "dd/mm/yyyy"})
+        formato_datetime = workbook.add_format({"num_format": "dd/mm/yyyy hh:mm"})
+
+        colunas_moeda = {
+            "Meta", "Meta Geral", "Meta Mensal", "Faltante", "Faltante para Meta", "Excedente",
+            "Emissão", "Pago", "A Vencer", "Quebra", "Principal Líquido", "Multa Líquida",
+            "Juros Líquido", "Valor Parcela", "Honorário Líquido", "Vlr. Total Acordo",
+        }
+        colunas_percentual = {"% Meta", "% Pago", "% A Vencer", "% Quebra"}
+        colunas_data = {"Data Inicial", "Data Final", "Data Referência"}
+        colunas_datetime = {"Data Acordo", "Data Emissão", "Data Pagamento"}
+
+        for nome_aba, df in abas.items():
+            worksheet = writer.sheets[nome_aba]
+            for col_num, value in enumerate(df.columns.values):
+                worksheet.write(0, col_num, value, formato_cabecalho)
+
+            for idx, col in enumerate(df.columns):
+                largura = max(len(str(col)) + 2, 15)
+                if not df.empty:
+                    largura = max(largura, min(50, int(df[col].astype(str).map(len).max()) + 2))
+
+                formato = None
+                if col in colunas_moeda:
+                    formato = formato_moeda
+                elif col in colunas_data:
+                    formato = formato_data
+                elif col in colunas_datetime:
+                    formato = formato_datetime
+                elif col in colunas_percentual:
+                    # As porcentagens foram salvas como 0-100 para leitura humana.
+                    formato = None
+
+                worksheet.set_column(idx, idx, largura, formato)
+
+            worksheet.autofilter(0, 0, max(len(df), 1), max(len(df.columns) - 1, 0))
+            worksheet.freeze_panes(1, 0)
+
+    output.seek(0)
+
+    nome_arquivo = f"acompanhamento_geral_{date.today().strftime('%Y%m%d')}.xlsx"
+    response = HttpResponse(
+        output.read(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = f'attachment; filename="{nome_arquivo}"'
+    return response

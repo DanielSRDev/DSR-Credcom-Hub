@@ -30,6 +30,27 @@ def decimal_or_zero(value):
     return Decimal(str(value))
 
 
+def calcular_valores_acordo_planilha(principal_liquido, multa_liquida, juros_liquido, honorario_liquido):
+    """
+    Valores adicionais usados somente na Planilha Geral.
+
+    Valor Parcela = principal líquido + multa líquida + juros líquido.
+    Vlr. Total Acordo = Valor Parcela + honorário líquido.
+
+    Esses campos não alteram a regra do HUB:
+    Emissão/Pago/A vencer/Quebra continuam usando honorário líquido.
+    """
+    principal_liquido = decimal_or_zero(principal_liquido)
+    multa_liquida = decimal_or_zero(multa_liquida)
+    juros_liquido = decimal_or_zero(juros_liquido)
+    honorario_liquido = decimal_or_zero(honorario_liquido)
+
+    valor_parcela = principal_liquido + multa_liquida + juros_liquido
+    valor_total_acordo = valor_parcela + honorario_liquido
+
+    return valor_parcela, valor_total_acordo
+
+
 def normalizar_bigint(valor):
     if valor is None or valor == "":
         return None
@@ -239,6 +260,8 @@ def criar_registros_locais(registros_acordo, aco_ids_pagos):
                 numero_acordo=item.get("numero_acordo") or "",
                 aco_id=aco_id,
                 contrato=item.get("contrato") or "",
+                con_id=normalizar_bigint(item.get("con_id")),
+                observacao_contrato=item.get("observacao_contrato") or "",
 
                 cliente=item.get("cliente") or "",
                 cpf_cnpj=item.get("cpf_cnpj") or "",
@@ -266,6 +289,7 @@ def criar_registros_locais(registros_acordo, aco_ids_pagos):
                 honorario_liquido=honorario_liquido,
 
                 despesas=decimal_or_zero(item.get("despesas")),
+                despesa_liquida=decimal_or_zero(item.get("despesa_liquida")),
                 subtotal_bruto=decimal_or_zero(item.get("subtotal_bruto")),
                 desconto_total=decimal_or_zero(item.get("desconto_total")),
                 valor_total_liquido=decimal_or_zero(item.get("valor_total_liquido")),
@@ -451,6 +475,17 @@ def criar_registros_relatorio_a_partir_painel(itens_painel):
     for item in itens_painel:
         valor_emissao, valor_pago, valor_avencer, valor_quebra = valores_item_painel_para_relatorio(item)
 
+        principal_liquido = decimal_or_zero(item.principal_liquido)
+        multa_liquida = decimal_or_zero(item.multa_liquida)
+        juros_liquido = decimal_or_zero(item.juros_liquido)
+        honorario_liquido = decimal_or_zero(item.honorario_liquido)
+        valor_parcela, valor_total_acordo = calcular_valores_acordo_planilha(
+            principal_liquido=principal_liquido,
+            multa_liquida=multa_liquida,
+            juros_liquido=juros_liquido,
+            honorario_liquido=honorario_liquido,
+        )
+
         registros.append(
             PainelOperacaoRelatorioGeral(
                 origem_registro="HUB",
@@ -463,6 +498,8 @@ def criar_registros_relatorio_a_partir_painel(itens_painel):
                 numero_acordo=item.numero_acordo or "",
                 aco_id=item.aco_id,
                 contrato=item.contrato or "",
+                con_id=item.con_id,
+                observacao_contrato=getattr(item, "observacao_contrato", "") or "",
 
                 cliente=item.cliente or "",
                 cpf_cnpj=item.cpf_cnpj or "",
@@ -475,7 +512,15 @@ def criar_registros_relatorio_a_partir_painel(itens_painel):
 
                 honorario_bruto=decimal_or_zero(item.honorario_bruto),
                 desconto_honorario=decimal_or_zero(item.desconto_honorario),
-                honorario_liquido=decimal_or_zero(item.honorario_liquido),
+                honorario_liquido=honorario_liquido,
+
+                principal_liquido=principal_liquido,
+                multa_liquida=multa_liquida,
+                juros_liquido=juros_liquido,
+                valor_parcela=valor_parcela,
+                valor_total_acordo=valor_total_acordo,
+                despesa_liquida=decimal_or_zero(item.despesa_liquida),
+                valor_pagamento_periodo=Decimal("0.00"),
 
                 qtd_parcelas_acordo=item.qtd_parcelas_acordo or 0,
                 status_acordo=item.status_acordo or "",
@@ -617,11 +662,21 @@ def criar_registros_relatorio_geral(registros_hub, registros_pagos_extra, data_b
         desconto_honorario = decimal_or_zero(item.get("desconto_honorario"))
         honorario_liquido = decimal_or_zero(item.get("honorario_liquido"))
 
+        principal_liquido = decimal_or_zero(item.get("principal_liquido"))
+        multa_liquida = decimal_or_zero(item.get("multa_liquida"))
+        juros_liquido = decimal_or_zero(item.get("juros_liquido"))
+        despesa_liquida = decimal_or_zero(item.get("despesa_liquida"))
+        valor_pagamento_periodo = decimal_or_zero(item.get("valor_pago_periodo"))
+        valor_parcela, valor_total_acordo = calcular_valores_acordo_planilha(
+            principal_liquido=principal_liquido,
+            multa_liquida=multa_liquida,
+            juros_liquido=juros_liquido,
+            honorario_liquido=honorario_liquido,
+        )
+
         origem = (item.get("origem_registro") or "").strip().upper()
         status_original = item.get("status_acordo") or ""
-        valor_pago_periodo = decimal_or_zero(item.get("valor_pago_periodo"))
-
-        tem_pagamento_real = valor_pago_periodo > 0
+        tem_pagamento_real = valor_pagamento_periodo > 0
         pago_sem_baixa_real = (not tem_pagamento_real) and eh_status_pago(status_original)
         tem_pagamento = tem_pagamento_real or pago_sem_baixa_real
 
@@ -657,6 +712,8 @@ def criar_registros_relatorio_geral(registros_hub, registros_pagos_extra, data_b
                 numero_acordo=item.get("numero_acordo") or "",
                 aco_id=normalizar_bigint(item.get("aco_id")),
                 contrato=item.get("contrato") or "",
+                con_id=normalizar_bigint(item.get("con_id")),
+                observacao_contrato=item.get("observacao_contrato") or "",
 
                 cliente=item.get("cliente") or "",
                 cpf_cnpj=item.get("cpf_cnpj") or "",
@@ -670,6 +727,14 @@ def criar_registros_relatorio_geral(registros_hub, registros_pagos_extra, data_b
                 honorario_bruto=honorario_bruto,
                 desconto_honorario=desconto_honorario,
                 honorario_liquido=honorario_liquido,
+
+                principal_liquido=principal_liquido,
+                multa_liquida=multa_liquida,
+                juros_liquido=juros_liquido,
+                valor_parcela=valor_parcela,
+                valor_total_acordo=valor_total_acordo,
+                despesa_liquida=despesa_liquida,
+                valor_pagamento_periodo=valor_pagamento_periodo,
 
                 qtd_parcelas_acordo=item.get("qtd_parcelas_acordo") or 0,
                 status_acordo=item.get("status_acordo") or "",

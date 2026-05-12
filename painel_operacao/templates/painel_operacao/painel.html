@@ -17,7 +17,14 @@
             <p class="painel-subtitulo">Resumo de Emissao, Pago, Avencer e Quebra</p>
         </div>
 
-        <div class="painel-acoes-topo">
+        <div class="painel-acoes-topo d-flex gap-2 flex-wrap">
+            {% if pode_ver_acompanhamento_geral %}
+                <a href="{% url 'painel_operacao:acompanhamento_geral' %}"
+                   class="btn btn-primary">
+                    Acompanhamento Geral
+                </a>
+            {% endif %}
+
             <a href="{% url 'painel_operacao:config' %}" class="btn btn-outline-secondary">
                 Configuração
             </a>
@@ -97,6 +104,15 @@
                                 class="btn btn-dark">
                             Relatório Geral
                         </button>
+
+                        {% if pode_ver_acompanhamento_geral %}
+                            <button type="submit"
+                                    formaction="{% url 'painel_operacao:acompanhamento_geral' %}"
+                                    formmethod="get"
+                                    class="btn btn-info">
+                                Acompanhamento Geral
+                            </button>
+                        {% endif %}
 
                     </div>
 

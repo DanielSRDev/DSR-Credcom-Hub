@@ -25,6 +25,13 @@ evento_acordo AS (
       AND ce.evc_data >= %s
       AND ce.evc_data < DATEADD(DAY, 1, %s)
 ),
+acordo_parcela_resumo AS (
+    SELECT
+        aco_id,
+        SUM(ISNULL(acp_despesa, 0)) AS despesa_liquida
+    FROM dbo.tb_acordo_parcela
+    GROUP BY aco_id
+),
 base_acordo AS (
     SELECT DISTINCT
         a.aco_id,
@@ -52,10 +59,16 @@ base_acordo AS (
         COALESCE(pss.pes_cpfcnpj, pss_nv.pes_cpfcnpj) AS pes_cpfcnpj,
 
         COALESCE(c.con_numero, c_nv.con_numero) AS con_numero,
+        COALESCE(c.con_obs, c_nv.con_obs) AS con_obs,
+        COALESCE(c.con_id, c_nv.con_id) AS con_id,
+        ISNULL(apr.despesa_liquida, 0) AS despesa_liquida,
         COALESCE(c.cre_id, c_nv.cre_id) AS cre_id,
         COALESCE(c.fil_id, c_nv.fil_id) AS fil_id,
         COALESCE(c.pro_id, c_nv.pro_id) AS pro_id
     FROM dbo.tb_acordo a
+
+    LEFT JOIN acordo_parcela_resumo apr
+        ON apr.aco_id = a.aco_id
 
     LEFT JOIN dbo.tb_acordo_parcela ap
         ON ap.aco_id = a.aco_id
@@ -90,8 +103,10 @@ SELECT
     b.pes_nome AS cliente,
     b.pes_cpfcnpj AS cpf_cnpj,
     b.con_numero AS contrato,
+    b.con_id AS con_id,
     cr.cre_id AS cre_id,
     cr.cre_sigla AS credor,
+    b.con_obs AS observacao_contrato,
     CONCAT(
         COALESCE(cf.fil_codigo, ''),
         CASE
@@ -115,6 +130,7 @@ SELECT
     ISNULL(b.aco_desc_ho, 0) AS desconto_honorario,
     b.aco_ho - ISNULL(b.aco_desc_ho, 0) AS honorario_liquido,
     ISNULL(b.aco_despesas, 0) AS despesas,
+    ISNULL(b.despesa_liquida, 0) AS despesa_liquida,
     b.aco_sub_total AS subtotal_bruto,
     ISNULL(b.aco_desc_total, 0) AS desconto_total,
     b.aco_total AS valor_total_liquido,
@@ -154,6 +170,9 @@ GROUP BY
     b.pes_nome,
     b.pes_cpfcnpj,
     b.con_numero,
+    b.con_obs,
+    b.con_id,
+    b.despesa_liquida,
     cr.cre_id,
     cr.cre_sigla,
     cf.fil_codigo,
@@ -347,11 +366,13 @@ SQL_RELATORIO_GERAL_PAGOS_EXTRA = """
         CAST(%s AS DATE) AS data_ini,
         CAST(%s AS DATE) AS data_fim
 ),
+
 pagamentos_periodo AS (
     SELECT
         p.pgo_id,
         p.aco_id,
         p.pgo_data AS data_pagamento,
+        p.pgo_valor AS valor_pago_periodo,
         ROW_NUMBER() OVER (
             PARTITION BY p.aco_id
             ORDER BY p.pgo_data DESC, p.pgo_id DESC
@@ -362,6 +383,7 @@ pagamentos_periodo AS (
       AND p.pgo_data < DATEADD(DAY, 1, per.data_fim)
       AND p.aco_id IS NOT NULL
 ),
+
 evento_acordo AS (
     SELECT
         ce.evc_id,
@@ -378,14 +400,35 @@ evento_acordo AS (
     LEFT JOIN dbo.tb_operador op
         ON op.ope_id = ce.ope_id
     WHERE e.eve_nome = 'Acordo'
+
 ),
+
+acordo_parcela_resumo AS (
+    SELECT
+        aco_id,
+        SUM(ISNULL(acp_despesa, 0)) AS despesa_liquida
+    FROM dbo.tb_acordo_parcela
+    GROUP BY aco_id
+),
+
 base_acordo AS (
     SELECT DISTINCT
         a.aco_id,
         a.aco_numero,
         a.aco_data,
+
+        a.aco_principal,
+        ISNULL(a.aco_desc_princ, 0) AS desconto_principal,
+
+        a.aco_multa,
+        ISNULL(a.aco_desc_multa, 0) AS desconto_multa,
+
+        a.aco_juros,
+        ISNULL(a.aco_desc_juros, 0) AS desconto_juros,
+
         a.aco_ho,
         ISNULL(a.aco_desc_ho, 0) AS desconto_honorario,
+
         a.aco_num_parc,
         a.aco_status,
         a.aco_tipo,
@@ -395,10 +438,16 @@ base_acordo AS (
         COALESCE(pss.pes_cpfcnpj, pss_nv.pes_cpfcnpj) AS pes_cpfcnpj,
 
         COALESCE(c.con_numero, c_nv.con_numero) AS con_numero,
+        COALESCE(c.con_obs, c_nv.con_obs) AS con_obs,
+        COALESCE(c.con_id, c_nv.con_id) AS con_id,
+        ISNULL(apr.despesa_liquida, 0) AS despesa_liquida,
         COALESCE(c.cre_id, c_nv.cre_id) AS cre_id,
         COALESCE(c.fil_id, c_nv.fil_id) AS fil_id,
         COALESCE(c.pro_id, c_nv.pro_id) AS pro_id
     FROM dbo.tb_acordo a
+
+    LEFT JOIN acordo_parcela_resumo apr
+        ON apr.aco_id = a.aco_id
 
     LEFT JOIN dbo.tb_acordo_parcela ap
         ON ap.aco_id = a.aco_id
@@ -424,6 +473,7 @@ base_acordo AS (
     LEFT JOIN dbo.tb_pessoa pss_nv
         ON pss_nv.pes_id = cl_nv.cli_id
 )
+
 SELECT
     'PAGAMENTO_EXTRA' AS origem_registro,
 
@@ -438,6 +488,8 @@ SELECT
     b.pes_nome AS cliente,
     b.pes_cpfcnpj AS cpf_cnpj,
     b.con_numero AS contrato,
+    b.con_id AS con_id,
+    b.con_obs AS observacao_contrato,
 
     cr.cre_id AS cre_id,
     cr.cre_sigla AS credor,
@@ -454,9 +506,14 @@ SELECT
     pr.pro_nome AS tipo_contrato,
     CAST(NULL AS VARCHAR(255)) AS tipo_negociacao,
 
+    b.aco_principal - b.desconto_principal AS principal_liquido,
+    b.aco_multa - b.desconto_multa AS multa_liquida,
+    b.aco_juros - b.desconto_juros AS juros_liquido,
+
     b.aco_ho AS honorario_bruto,
     b.desconto_honorario AS desconto_honorario,
     b.aco_ho - b.desconto_honorario AS honorario_liquido,
+    ISNULL(b.despesa_liquida, 0) AS despesa_liquida,
 
     b.aco_num_parc AS qtd_parcelas_acordo,
     ast.aco_status_descricao AS status_acordo,
@@ -465,7 +522,7 @@ SELECT
     ev.ope_login AS emitido_por_login,
     ev.ope_login AS emitido_por_nome,
 
-    CAST(1 AS DECIMAL(14,2)) AS valor_pago_periodo
+    pg.valor_pago_periodo AS valor_pago_periodo
 
 FROM pagamentos_periodo pg
 INNER JOIN base_acordo b
@@ -486,12 +543,12 @@ LEFT JOIN dbo.tb_acordo_status ast
     ON ast.aco_status = b.aco_status
 
 WHERE pg.rn = 1
+
+  -- pagamento no mês atual, mas emissão fora do período atual
   AND (
       ev.evc_data IS NULL
-      OR NOT (
-          ev.evc_data >= per.data_ini
-          AND ev.evc_data < DATEADD(DAY, 1, per.data_fim)
-      )
+      OR ev.evc_data < per.data_ini
+      OR ev.evc_data >= DATEADD(DAY, 1, per.data_fim)
   )
 
 ORDER BY

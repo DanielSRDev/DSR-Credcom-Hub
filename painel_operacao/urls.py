@@ -6,6 +6,9 @@ app_name = "painel_operacao"
 urlpatterns = [
     path("", views.painel_view, name="painel"),
     path("config/", views.config_view, name="config"),
+    path("acompanhamento-geral/", views.acompanhamento_geral_view, name="acompanhamento_geral"),
+    path("acompanhamento-geral/exportar/", views.exportar_acompanhamento_geral_view, name="exportar_acompanhamento_geral"),
+
     path("atualizar/", views.atualizar_view, name="atualizar"),
     path("exportar-excel/", views.exportar_excel_view, name="exportar_excel"),
 

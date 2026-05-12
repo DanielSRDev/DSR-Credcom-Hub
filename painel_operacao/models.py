@@ -41,6 +41,52 @@ class CarteiraSupervisor(models.Model):
         return f"{self.credor_nome} -> {self.supervisor.nome}"
 
 
+class MetaOperadorCarteira(models.Model):
+    """Meta mensal individual por operador e carteira.
+
+    Regra: a Meta Geral do Acompanhamento é a soma das metas ativas
+    cadastradas para o mês/ano filtrado.
+    """
+    ano = models.PositiveIntegerField("Ano", db_index=True)
+    mes = models.PositiveSmallIntegerField("Mês", db_index=True)
+
+    carteira = models.ForeignKey(
+        CarteiraSupervisor,
+        on_delete=models.CASCADE,
+        related_name="metas_operadores",
+        verbose_name="Carteira",
+    )
+
+    operador_login = models.CharField("Login do operador", max_length=255, blank=True, default="", db_index=True)
+    operador_nome = models.CharField("Nome do operador", max_length=255, db_index=True)
+
+    meta_mensal = models.DecimalField("Meta mensal", max_digits=14, decimal_places=2, default=0)
+    ativo = models.BooleanField("Ativo", default=True)
+
+    created_at = models.DateTimeField("Criado em", auto_now_add=True)
+    updated_at = models.DateTimeField("Atualizado em", auto_now=True)
+
+    class Meta:
+        verbose_name = "Meta por Operador e Carteira"
+        verbose_name_plural = "Metas por Operador e Carteira"
+        ordering = ["-ano", "-mes", "carteira__credor_nome", "operador_nome"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["ano", "mes", "carteira", "operador_login", "operador_nome"],
+                name="uniq_meta_operador_carteira_mes",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["ano", "mes", "ativo"]),
+            models.Index(fields=["operador_nome"]),
+            models.Index(fields=["operador_login"]),
+        ]
+
+    def __str__(self):
+        login = f" ({self.operador_login})" if self.operador_login else ""
+        return f"{self.mes:02d}/{self.ano} - {self.operador_nome}{login} - {self.carteira.credor_nome}: R$ {self.meta_mensal}"
+
+
 class OperadorAlias(models.Model):
     login_original = models.CharField("Login original", max_length=255, unique=True)
     nome_exibicao = models.CharField("Nome correto", max_length=255)
@@ -127,6 +173,8 @@ class PainelOperacaoRegistro(models.Model):
     numero_acordo = models.CharField("Número do acordo", max_length=100, blank=True, default="")
     aco_id = models.BigIntegerField("Aco ID", db_index=True)
     contrato = models.CharField("Contrato", max_length=100, blank=True, default="")
+    con_id = models.BigIntegerField("Contrato ID", null=True, blank=True, db_index=True)
+    observacao_contrato = models.TextField("Observação do contrato", blank=True, null=True)
 
     cliente = models.CharField("Cliente", max_length=255, blank=True, default="")
     cpf_cnpj = models.CharField("CPF/CNPJ", max_length=30, blank=True, default="")
@@ -154,6 +202,7 @@ class PainelOperacaoRegistro(models.Model):
     honorario_liquido = models.DecimalField(max_digits=14, decimal_places=2, default=0)
 
     despesas = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    despesa_liquida = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     subtotal_bruto = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     desconto_total = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     valor_total_liquido = models.DecimalField(max_digits=14, decimal_places=2, default=0)
@@ -204,6 +253,8 @@ class PainelOperacaoRelatorioGeral(models.Model):
     numero_acordo = models.CharField("Número do acordo", max_length=100, blank=True, default="")
     aco_id = models.BigIntegerField("Aco ID", db_index=True)
     contrato = models.CharField("Contrato", max_length=100, blank=True, default="")
+    con_id = models.BigIntegerField("Contrato ID", null=True, blank=True, db_index=True)
+    observacao_contrato = models.TextField(blank=True, null=True)
 
     cliente = models.CharField("Cliente", max_length=255, blank=True, default="")
     cpf_cnpj = models.CharField("CPF/CNPJ", max_length=30, blank=True, default="")
@@ -217,6 +268,16 @@ class PainelOperacaoRelatorioGeral(models.Model):
     honorario_bruto = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     desconto_honorario = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     honorario_liquido = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+
+    # Campos usados somente para enriquecer a exportação da Planilha Geral.
+    # Não entram na regra financeira do HUB; a regra do painel continua usando honorário líquido.
+    principal_liquido = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    multa_liquida = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    juros_liquido = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    valor_parcela = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    valor_total_acordo = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    despesa_liquida = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    valor_pagamento_periodo = models.DecimalField(max_digits=14, decimal_places=2, default=0)
 
     qtd_parcelas_acordo = models.IntegerField(default=0)
     status_acordo = models.CharField(max_length=255, blank=True, default="")

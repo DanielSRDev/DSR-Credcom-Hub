@@ -2,6 +2,7 @@ from django.contrib import admin
 from .models import (
     SupervisorPainel,
     CarteiraSupervisor,
+    MetaOperadorCarteira,
     OperadorAlias,
     PainelConfiguracao,
     PainelSyncLog,
@@ -25,6 +26,37 @@ class CarteiraSupervisorAdmin(admin.ModelAdmin):
     list_filter = ("ativo", "supervisor")
     search_fields = ("credor_nome", "cre_id", "supervisor__nome")
     ordering = ("credor_nome",)
+
+
+@admin.register(MetaOperadorCarteira)
+class MetaOperadorCarteiraAdmin(admin.ModelAdmin):
+    list_display = (
+        "ano",
+        "mes",
+        "carteira",
+        "operador_nome",
+        "operador_login",
+        "meta_mensal",
+        "ativo",
+        "updated_at",
+    )
+    list_filter = (
+        "ano",
+        "mes",
+        "ativo",
+        "carteira__supervisor",
+        "carteira",
+    )
+    search_fields = (
+        "operador_nome",
+        "operador_login",
+        "carteira__credor_nome",
+        "carteira__cre_id",
+        "carteira__supervisor__nome",
+    )
+    autocomplete_fields = ("carteira",)
+    ordering = ("-ano", "-mes", "carteira__credor_nome", "operador_nome")
+    list_editable = ("meta_mensal", "ativo")
 
 
 @admin.register(OperadorAlias)
