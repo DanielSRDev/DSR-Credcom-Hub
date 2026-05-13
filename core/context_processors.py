@@ -101,7 +101,7 @@ def nav_permissoes(request) -> Dict[str, bool]:
         and nao_bloqueado("zapmsg")
     )
     pode_ver_painel_operacao = (
-        (is_coordenacao or is_supervisao or tem_gestao)
+        (is_coordenacao or is_supervisao or tem_gestao or is_operador)
         and nao_bloqueado("painel_operacao")
     )
     pode_ver_chat = nao_bloqueado("chat")  # qualquer autenticado pode ver chat

@@ -53,17 +53,52 @@ def zero_decimal(valor):
 
 
 def limpar_filial_exportacao(valor):
-    """Remove o código operacional da filial na exportação.
-
-    Exemplo:
-    "VB29 - Residencial Drª Zélia Nunes" -> "Residencial Drª Zélia Nunes"
-    """
+    """Remove o codigo operacional da filial na exportacao."""
     texto = str(valor or "").strip()
-
     if not texto:
         return ""
-
     return re.sub(r"^VB\s*\d+\s*(?:[-–—]\s*)?", "", texto, flags=re.IGNORECASE).strip()
+
+
+# ============================================================
+# MAPA DE NORMALIZAÇÃO DE CONTRATANTE
+# Para adicionar um novo: basta incluir uma linha no dicionário.
+# Chave  = sigla exata que vem do banco (case-insensitive na aplicação)
+# Valor  = nome legível que aparece no Excel
+# ============================================================
+CONTRATANTE_MAP = {
+    "VALLE":  "Valle Prime",
+    "VB":     "ViverBem",
+    "JVF":    "JVF",
+    "FRT":    "Fortes",
+    "AM3":    "AM3",
+    "LOC":    "Localiza Imóveis",
+    "EBM":    "EBM",
+    "FGR":    "FGR",
+    "LEE":    "LEE Empreend",
+    "POLIS":  "Polis Empreend",
+    "ENEC":   "Enec Engenharia",
+    "SOMOS":  "SOMOS",
+    "Adao":   "Adão Imóveis",
+    "+VGV":   "Mais VGV",
+    "VILA":   "Vila Brasil",
+    "GPL":    "GPL",
+}
+
+
+def normalizar_contratante(sigla) -> str:
+    if not sigla:
+        return ""
+    sigla_str = str(sigla).strip()
+    # busca exata primeiro (preserva case do mapa)
+    if sigla_str in CONTRATANTE_MAP:
+        return CONTRATANTE_MAP[sigla_str]
+    # fallback case-insensitive
+    upper = sigla_str.upper()
+    for chave, valor in CONTRATANTE_MAP.items():
+        if chave.upper() == upper:
+            return valor
+    return sigla_str
 
 
 def faixa_operador_classe(valor):
@@ -701,6 +736,14 @@ def exportar_relatorio_geral_view(request):
         honorario_liquido = pd.to_numeric(df.get("honorario_liquido", 0), errors="coerce").fillna(0)
         despesa_liquida = pd.to_numeric(df.get("despesa_liquida", 0), errors="coerce").fillna(0)
 
+        # Garante que colunas monetárias ficam como float no df (evita Decimal virar string no Excel)
+        for col_num in ["honorario_liquido", "valor_total_acordo", "valor_parcela",
+                        "principal_liquido", "multa_liquida", "juros_liquido",
+                        "despesa_liquida", "valor_pago", "valor_avencer", "valor_quebra",
+                        "valor_pagamento_periodo"]:
+            if col_num in df.columns:
+                df[col_num] = pd.to_numeric(df[col_num], errors="coerce").fillna(0)
+
         # Regra nova:
         # Valor Parcela = valor do pagamento - H.O. - despesa.
         # Se a linha não tiver valor real de pagamento salvo, mantém a base antiga
@@ -766,6 +809,10 @@ def exportar_relatorio_geral_view(request):
             "Data Pagto Parcela",
         ]
         df = df[[col for col in colunas_exportacao if col in df.columns]]
+
+        # Normaliza o nome do contratante para exibição legível no Excel
+        if "Contratante" in df.columns:
+            df["Contratante"] = df["Contratante"].apply(normalizar_contratante)
 
     output = BytesIO()
 

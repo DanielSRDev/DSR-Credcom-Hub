@@ -1,14 +1,14 @@
-#views.py
 from django.http import HttpResponseForbidden
 from core.permissions import tem_acesso
 
 from datetime import datetime, timedelta, date
+from decimal import Decimal, ROUND_HALF_UP
 import unicodedata
 
 from django.contrib.auth.decorators import login_required
 from django.conf import settings
 from django.contrib import messages
-from django.db import connection, transaction
+from django.db import connection
 from django.shortcuts import redirect, render
 from django.views.decorators.http import require_POST
 
@@ -97,7 +97,6 @@ def vb_reference(credor_id, filial_nome, default_reference):
         pass
     return default_reference
 
-# ✅ NOVO: helper pra pegar só o código VBxx (ou "" se não achar)
 def vb_code_only(credor_id, filial_nome) -> str:
     return vb_reference(credor_id, filial_nome, "") or ""
 
@@ -208,34 +207,16 @@ def _filtro_credores_despesa(credores: list[str] | None) -> tuple[str, list]:
     return f" AND ({frag_r} OR {frag_v}) ", (p1 + p2)
 
 def _last_con_obs_by_pgo(pgo_id: int | None) -> str | None:
-    """
-    Busca o con_obs mais recente para um pgo_id,
-    primeiro em tb_repasse; se não achar, tenta em tb_repassevr.
-    """
     if not pgo_id:
         return None
-
     r = qfetchone(
-        """
-        SELECT con_obs
-          FROM tb_repasse
-         WHERE pgo_id = %s
-         ORDER BY COALESCE(pgo_data, NOW()) DESC
-         LIMIT 1
-        """,
+        "SELECT con_obs FROM tb_repasse WHERE pgo_id = %s ORDER BY COALESCE(pgo_data, NOW()) DESC LIMIT 1",
         [pgo_id],
     )
     if r and r.get("con_obs"):
         return r["con_obs"]
-
     rv = qfetchone(
-        """
-        SELECT con_obs
-          FROM tb_repassevr
-         WHERE pgo_id = %s
-         ORDER BY COALESCE(pgo_data, NOW()) DESC
-         LIMIT 1
-        """,
+        "SELECT con_obs FROM tb_repassevr WHERE pgo_id = %s ORDER BY COALESCE(pgo_data, NOW()) DESC LIMIT 1",
         [pgo_id],
     )
     return rv["con_obs"] if rv and rv.get("con_obs") else None
@@ -255,8 +236,7 @@ def listar_repasse(data_ini, data_fim, cliente, credores, enviado):
         SELECT {PK_COL[table]} AS id,
                aco_id, pgo_data, cliente_nome, cliente_cpfcnpj,
                credor_sigla, filial_nome, con_obs, vlr_repasse, enviado,
-               credor_id,
-               ope_nome
+               credor_id, ope_nome
           FROM {table}
         {where}
         ORDER BY COALESCE(pgo_data, NOW()) DESC, {PK_COL[table]} DESC
@@ -275,8 +255,7 @@ def listar_repassevr(data_ini, data_fim, cliente, credores, enviado):
         SELECT {PK_COL[table]} AS id,
                aco_id, pgo_data, cliente_nome, cliente_cpfcnpj,
                credor_sigla, filial_nome, con_obs, vlr_repasse, enviado,
-               credor_id,
-               ope_nome
+               credor_id, ope_nome
           FROM {table}
         {where}
         ORDER BY COALESCE(pgo_data, NOW()) DESC, {PK_COL[table]} DESC
@@ -284,22 +263,15 @@ def listar_repassevr(data_ini, data_fim, cliente, credores, enviado):
     return qfetchall(sql, params)
 
 def listar_despesa(data_ini, data_fim, cliente, credores, enviado):
-    # mesma expressão usada para exibir a data:
     data_expr = "COALESCE(r.pgo_data, rv.pgo_data, d.aco_etl_alteracao)"
-
     where, params = " WHERE 1=1 ", []
-
     frag, p = _filtro_data_fragment(data_ini, data_fim, data_expr)
     where += frag; params += p
-
     if cliente:
         where += " AND (r.cliente_nome ILIKE %s OR rv.cliente_nome ILIKE %s OR d.dtp_nome ILIKE %s) "
         params += [f"%{cliente}%"] * 3
-
     frag, p = _filtro_credores_despesa(credores); where += frag; params += p
-
     where += _filtro_enviado_fragment(enviado).replace(" AND ", " AND d.")
-
     sql = f"""
         SELECT d.des_id_local AS id,
                d.aco_id,
@@ -309,26 +281,21 @@ def listar_despesa(data_ini, data_fim, cliente, credores, enviado):
                COALESCE(r.credor_sigla,  rv.credor_sigla)          AS credor_sigla,
                COALESCE(r.filial_nome,   rv.filial_nome)           AS filial_nome,
                COALESCE(r.con_obs,       rv.con_obs, d.dtp_nome)   AS con_obs,
-               d.des_valor,
-               d.enviado,
+               d.des_valor, d.enviado,
                COALESCE(r.credor_id, rv.credor_id)                 AS credor_id,
                COALESCE(r.ope_nome, rv.ope_nome)                   AS ope_nome
           FROM tb_despesa d
           LEFT JOIN LATERAL (
               SELECT pgo_data, cliente_nome, cliente_cpfcnpj, credor_sigla, filial_nome,
                      con_obs, credor_id, ope_nome
-                FROM tb_repasse r
-               WHERE r.aco_id = d.aco_id
-               ORDER BY COALESCE(r.pgo_data, NOW()) DESC
-               LIMIT 1
+                FROM tb_repasse r WHERE r.aco_id = d.aco_id
+               ORDER BY COALESCE(r.pgo_data, NOW()) DESC LIMIT 1
           ) r ON TRUE
           LEFT JOIN LATERAL (
               SELECT pgo_data, cliente_nome, cliente_cpfcnpj, credor_sigla, filial_nome,
                      con_obs, credor_id, ope_nome
-                FROM tb_repassevr rv
-               WHERE rv.aco_id = d.aco_id
-               ORDER BY COALESCE(rv.pgo_data, NOW()) DESC
-               LIMIT 1
+                FROM tb_repassevr rv WHERE rv.aco_id = d.aco_id
+               ORDER BY COALESCE(rv.pgo_data, NOW()) DESC LIMIT 1
           ) rv ON TRUE
         {where}
         ORDER BY {data_expr} DESC, d.des_id_local DESC
@@ -343,29 +310,22 @@ def listar_contareceber(data_ini, data_fim, cliente, credores, enviado):
         where += " AND cliente_nome ILIKE %s "; params.append(f"%{cliente}%")
     frag, p = _filtro_credores("credor_sigla", credores); where += frag; params += p
     where += _filtro_enviado_fragment(enviado)
-
     sql = f"""
         SELECT {PK_COL[table]} AS id,
                co_id, pgo_data, cliente_nome, cliente_cpfcnpj,
                credor_sigla, filial_nome,
                COALESCE(r.con_obs, rv.con_obs)::text AS con_obs,
-               rec_ho, enviado, credor_id,
-               rec_atraso, dup,
-               ope_nome
+               rec_ho, enviado, credor_id, rec_atraso, dup, ope_nome
           FROM {table}
           LEFT JOIN LATERAL (
-              SELECT con_obs
-                FROM tb_repasse r
+              SELECT con_obs FROM tb_repasse r
                WHERE r.pgo_id = {table}.pgo_id
-               ORDER BY COALESCE(r.pgo_data, NOW()) DESC
-               LIMIT 1
+               ORDER BY COALESCE(r.pgo_data, NOW()) DESC LIMIT 1
           ) r ON TRUE
           LEFT JOIN LATERAL (
-              SELECT con_obs
-                FROM tb_repassevr rv
+              SELECT con_obs FROM tb_repassevr rv
                WHERE rv.pgo_id = {table}.pgo_id
-               ORDER BY COALESCE(rv.pgo_data, NOW()) DESC
-               LIMIT 1
+               ORDER BY COALESCE(rv.pgo_data, NOW()) DESC LIMIT 1
           ) rv ON TRUE
         {where}
         ORDER BY COALESCE(pgo_data, NOW()) DESC, {PK_COL[table]} DESC
@@ -380,28 +340,22 @@ def listar_contapagar(data_ini, data_fim, cliente, credores, enviado):
         where += " AND cliente_nome ILIKE %s "; params.append(f"%{cliente}%")
     frag, p = _filtro_credores("credor_sigla", credores); where += frag; params += p
     where += _filtro_enviado_fragment(enviado)
-
     sql = f"""
         SELECT {PK_COL[table]} AS id,
                co_id, pgo_data, cliente_nome, cliente_cpfcnpj,
                credor_sigla, filial_nome,
                COALESCE(r.con_obs, rv.con_obs)::text AS con_obs,
-               rec_ho, enviado, credor_id, rec_atraso,
-               ope_nome
+               rec_ho, enviado, credor_id, rec_atraso, ope_nome
           FROM {table}
           LEFT JOIN LATERAL (
-              SELECT con_obs
-                FROM tb_repasse r
+              SELECT con_obs FROM tb_repasse r
                WHERE r.pgo_id = {table}.pgo_id
-               ORDER BY COALESCE(r.pgo_data, NOW()) DESC
-               LIMIT 1
+               ORDER BY COALESCE(r.pgo_data, NOW()) DESC LIMIT 1
           ) r ON TRUE
           LEFT JOIN LATERAL (
-              SELECT con_obs
-                FROM tb_repassevr rv
+              SELECT con_obs FROM tb_repassevr rv
                WHERE rv.pgo_id = {table}.pgo_id
-               ORDER BY COALESCE(rv.pgo_data, NOW()) DESC
-               LIMIT 1
+               ORDER BY COALESCE(rv.pgo_data, NOW()) DESC LIMIT 1
           ) rv ON TRUE
         {where}
         ORDER BY COALESCE(pgo_data, NOW()) DESC, {PK_COL[table]} DESC
@@ -426,7 +380,6 @@ def _categoria_cr_in_contareceber(row: dict) -> str:
     atraso = row.get("rec_atraso") or 0
     filial_u = _norm_filial(row.get("filial_nome"))
     dup = bool(row.get("dup"))
-
     if credor_id == AM3_CREDOR_ID:
         if dup:
             if atraso > 120:
@@ -457,8 +410,6 @@ def _min_receipt_date() -> date | None:
 # ============================================================
 @login_required
 def painel(request):
-    if not tem_acesso(request.user, "NIBO"):
-        return HttpResponseForbidden("Você não tem acesso ao módulo Nibo.")
     credor_choices = _all_credor_siglas()
     form = FiltroForm(request.GET or None, credor_choices=credor_choices)
 
@@ -493,10 +444,18 @@ def painel(request):
 # ============================================================
 @login_required
 @require_POST
-@transaction.atomic
 def enviar_remessa(request):
+    """
+    Envia lançamentos para a API do Nibo.
+
+    NÃO usa @transaction.atomic intencionalmente:
+    - Chamadas HTTP externas não são reversíveis via rollback.
+    - Cada registro é isolado em try/except — falha em um não para os outros.
+    - Registros com falha exibem messages.error com o ID; os demais são processados.
+    """
     if not tem_acesso(request.user, "NIBO"):
         return HttpResponseForbidden("Você não tem acesso ao módulo Nibo.")
+
     account_id = settings.NIBO_ACCOUNT_ID
 
     ids_repasse      = [int(x) for x in request.POST.getlist("repasse_ids")]
@@ -516,47 +475,35 @@ def enviar_remessa(request):
         return row
 
     def load_repasse_base_by_aco(aco_id: int):
-        """
-        Busca dados de referência: tenta repasseVR primeiro.
-        Se não existir, busca repasse normal.
-        """
-        # 1) tenta VR
         vr = qfetchone(
             """
             SELECT pgo_data, cliente_nome, cliente_cpfcnpj, credor_sigla,
-                filial_nome, con_obs, credor_id, vlr_repasse,
-                ope_nome
-            FROM tb_repassevr
-            WHERE aco_id = %s
-            ORDER BY COALESCE(pgo_data, NOW()) DESC
-            LIMIT 1
+                   filial_nome, con_obs, credor_id, vlr_repasse, ope_nome
+              FROM tb_repassevr
+             WHERE aco_id = %s
+             ORDER BY COALESCE(pgo_data, NOW()) DESC LIMIT 1
             """,
             [aco_id],
         )
         if vr:
             return vr
-
-        # 2) fallback: tenta repasse normal
-        rep = qfetchone(
+        return qfetchone(
             """
             SELECT pgo_data, cliente_nome, cliente_cpfcnpj, credor_sigla,
-                filial_nome, con_obs, credor_id, vlr_repasse,
-                ope_nome
-            FROM tb_repasse
-            WHERE aco_id = %s
-            ORDER BY COALESCE(pgo_data, NOW()) DESC
-            LIMIT 1
+                   filial_nome, con_obs, credor_id, vlr_repasse, ope_nome
+              FROM tb_repasse
+             WHERE aco_id = %s
+             ORDER BY COALESCE(pgo_data, NOW()) DESC LIMIT 1
             """,
             [aco_id],
         )
-        return rep
 
     def send_receipt(*, stakeholder_id, dt, desc, reference, category_id, value, costcenter_id):
         return create_receipt_paid(
             account_id=account_id,
             stakeholder_id=stakeholder_id,
             dt=dt, desc=desc, reference=reference,
-            category_id=category_id, value=float(value or 0),
+            category_id=category_id, value=float(value),
             costcenter_id=costcenter_id, accrual_date=dt, flag=False,
         )
 
@@ -564,9 +511,20 @@ def enviar_remessa(request):
         return create_payment_scheduled(
             stakeholder_id=stakeholder_id,
             dt=vcto, desc=desc, reference=reference,
-            category_id=category_id, value=float(value or 0),
+            category_id=category_id, value=float(value),
             costcenter_id=costcenter_id, accrual_date=vcto,
         )
+
+    def _to_dec(val):
+        """
+        Converte para Decimal com 2 casas. Retorna None se < 0,01.
+        Evita erros de precisão float que fazem a API Nibo rejeitar o lançamento.
+        """
+        try:
+            d = Decimal(str(val or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        except Exception:
+            d = Decimal("0.00")
+        return d if d >= Decimal("0.01") else None
 
     # ----------- tb_repasse -----------
     for _id in ids_repasse:
@@ -574,60 +532,62 @@ def enviar_remessa(request):
         if not row:
             continue
 
-        pgo_dt = row.get("pgo_data") or datetime.now()
-        if not isinstance(pgo_dt, datetime):
-            pgo_dt = datetime.combine(pgo_dt, datetime.min.time())
+        valor_rep = _to_dec(row.get("vlr_repasse"))
+        if valor_rep is None:
+            messages.warning(request, f"tb_repasse id={row['id']} ignorado: valor zerado ou inválido.")
+            continue
 
-        min_dt = _min_receipt_date()
-        send_dt = pgo_dt.date()
-        if min_dt and send_dt < min_dt:
-            send_dt = min_dt
-            messages.warning(
-                request,
-                f"tb_repasse id={row['id']} (acordo {row.get('aco_id')}) com data {pgo_dt.date()} "
-                f"ajustada para {send_dt} (>= saldo inicial da conta)."
+        try:
+            pgo_dt = row.get("pgo_data") or datetime.now()
+            if not isinstance(pgo_dt, datetime):
+                pgo_dt = datetime.combine(pgo_dt, datetime.min.time())
+
+            min_dt = _min_receipt_date()
+            send_dt = pgo_dt.date()
+            if min_dt and send_dt < min_dt:
+                send_dt = min_dt
+                messages.warning(
+                    request,
+                    f"tb_repasse id={row['id']} (acordo {row.get('aco_id')}) com data {pgo_dt.date()} "
+                    f"ajustada para {send_dt} (>= saldo inicial da conta)."
+                )
+            dt_str = send_dt.strftime("%Y-%m-%d")
+
+            cliente_nome = row.get("cliente_nome") or "Sem Nome"
+            cliente_doc  = only_digits(row.get("cliente_cpfcnpj") or "00000000000")
+            stakeholder_cliente    = find_or_create_customer(cliente_nome, cliente_doc)
+            stakeholder_fornecedor = find_or_create_supplier(cliente_nome, cliente_doc)
+
+            cc_id = map_costcenter_by_id_cob(row.get("credor_id") or row.get("credor_sigla")) or CC_PADRAO
+            desc  = _desc(row.get("filial_nome"), row.get("con_obs"))
+            vb_code = vb_code_only(row.get("credor_id"), row.get("filial_nome"))
+            if vb_code:
+                desc = f"{desc} {vb_code}"
+
+            aco_id = row.get("aco_id")
+            reference = str(row.get("ope_nome") or "").strip() or str(aco_id or "")
+
+            send_receipt(
+                stakeholder_id=stakeholder_cliente,
+                dt=dt_str, desc=desc, reference=reference,
+                category_id=CAT["REPASSES_IN"], value=valor_rep,
+                costcenter_id=cc_id,
             )
-        dt_str = send_dt.strftime("%Y-%m-%d")
+            vcto = vcto_mais_15(pgo_dt)
+            send_payment(
+                stakeholder_id=stakeholder_fornecedor,
+                vcto=vcto, desc=desc, reference=reference,
+                category_id=CAT["REPASSES_OUT"], value=valor_rep,
+                costcenter_id=cc_id,
+            )
 
-        cliente_nome = row.get("cliente_nome") or "Sem Nome"
-        cliente_doc = only_digits(row.get("cliente_cpfcnpj") or "00000000000")
-        stakeholder_cliente = find_or_create_customer(cliente_nome, cliente_doc)
-        stakeholder_fornecedor = find_or_create_supplier(cliente_nome, cliente_doc)
+            qexec(f"UPDATE {TB['repasse']} SET enviado = TRUE WHERE {PK_COL[TB['repasse']]} = %s", [row["id"]])
+            processados += 1
 
-        cc_id = map_costcenter_by_id_cob(row.get("credor_id") or row.get("credor_sigla")) or CC_PADRAO
-        desc = _desc(row.get("filial_nome"), row.get("con_obs"))
-
-        # >>> MUDOU AQUI: VB vai pra DESCRIÇÃO
-        vb_code = vb_code_only(row.get("credor_id"), row.get("filial_nome"))
-        if vb_code:
-            desc = f"{desc} {vb_code}"
-
-        aco_id = row.get("aco_id")
-
-        # >>> MUDOU AQUI: referência = ope_nome (fallback p/ aco_id)
-        reference = str(row.get("ope_nome") or "").strip()
-        if not reference:
-            reference = str(aco_id or "")
-
-        send_receipt(
-            stakeholder_id=stakeholder_cliente,
-            dt=dt_str, desc=desc, reference=reference,
-            category_id=CAT["REPASSES_IN"], value=row.get("vlr_repasse"),
-            costcenter_id=cc_id,
-        )
-        vcto = vcto_mais_15(pgo_dt)
-        send_payment(
-            stakeholder_id=stakeholder_fornecedor,
-            vcto=vcto, desc=desc, reference=reference,
-            category_id=CAT["REPASSES_OUT"], value=row.get("vlr_repasse"),
-            costcenter_id=cc_id,
-        )
-
-        qexec(f"UPDATE {TB['repasse']} SET enviado = TRUE WHERE {PK_COL[TB['repasse']]} = %s", [row["id"]])
-        processados += 1
+        except Exception as e:
+            messages.error(request, f"tb_repasse id={row['id']} falhou: {e}")
 
     # ----------- tb_repassevr -----------
-    from decimal import Decimal, ROUND_HALF_UP
     for _id in ids_repassevr:
         row = get_by_id(TB["repassevr"], _id)
         if not row:
@@ -636,62 +596,53 @@ def enviar_remessa(request):
             messages.info(request, f"tb_repassevr id={row['id']} já enviado. Ignorado.")
             continue
 
-        try:
-            valor_dec = Decimal(str(row.get("vlr_repasse") or 0)).quantize(
-                Decimal("0.01"), rounding=ROUND_HALF_UP
-            )
-        except Exception:
-            valor_dec = Decimal("0.00")
-        if valor_dec < Decimal("0.01"):
+        valor_dec = _to_dec(row.get("vlr_repasse"))
+        if valor_dec is None:
             messages.warning(request, f"tb_repassevr id={row.get('id')} ignorado: valor < 0,01.")
             continue
 
-        pgo_dt = row.get("pgo_data") or datetime.now()
-        if not isinstance(pgo_dt, datetime):
-            pgo_dt = datetime.combine(pgo_dt, datetime.min.time())
+        try:
+            pgo_dt = row.get("pgo_data") or datetime.now()
+            if not isinstance(pgo_dt, datetime):
+                pgo_dt = datetime.combine(pgo_dt, datetime.min.time())
 
-        dt_str = pgo_dt.strftime("%Y-%m-%d")
-        vcto   = (pgo_dt.date() + timedelta(days=15)).strftime("%Y-%m-%d")
+            dt_str = pgo_dt.strftime("%Y-%m-%d")
+            vcto   = (pgo_dt.date() + timedelta(days=15)).strftime("%Y-%m-%d")
 
-        cliente_nome = row.get("cliente_nome") or "Sem Nome"
-        cliente_doc  = only_digits(row.get("cliente_cpfcnpj") or "00000000000")
-        stakeholder_cliente    = find_or_create_customer(cliente_nome, cliente_doc)
-        stakeholder_fornecedor = find_or_create_supplier(cliente_nome, cliente_doc)
+            cliente_nome = row.get("cliente_nome") or "Sem Nome"
+            cliente_doc  = only_digits(row.get("cliente_cpfcnpj") or "00000000000")
+            stakeholder_cliente    = find_or_create_customer(cliente_nome, cliente_doc)
+            stakeholder_fornecedor = find_or_create_supplier(cliente_nome, cliente_doc)
 
-        cc_id = map_costcenter_by_id_cob(row.get("credor_id") or row.get("credor_sigla")) or CC_PADRAO
-        aco_id = row.get("aco_id")
-        desc   = _desc(row.get("filial_nome"), row.get("con_obs"))
+            cc_id  = map_costcenter_by_id_cob(row.get("credor_id") or row.get("credor_sigla")) or CC_PADRAO
+            aco_id = row.get("aco_id")
+            desc   = _desc(row.get("filial_nome"), row.get("con_obs"))
+            vb_code = vb_code_only(row.get("credor_id"), row.get("filial_nome"))
+            is_vb = bool(vb_code)
+            if is_vb:
+                desc = f"{desc} {vb_code}"
 
-        # >>> MUDOU AQUI: VB vai pra DESCRIÇÃO
-        vb_code = vb_code_only(row.get("credor_id"), row.get("filial_nome"))
-        is_vb = bool(vb_code)
-        if is_vb:
-            desc = f"{desc} {vb_code}"
+            reference = str(row.get("ope_nome") or "").strip() or str(aco_id or "")
 
-        # >>> MUDOU AQUI: referência = ope_nome (fallback p/ aco_id)
-        reference = str(row.get("ope_nome") or "").strip()
-        if not reference:
-            reference = str(aco_id or "")
+            send_receipt(
+                stakeholder_id=stakeholder_cliente,
+                dt=dt_str, desc=desc, reference=reference,
+                category_id=CAT["REPASSES_IN"], value=valor_dec,
+                costcenter_id=cc_id,
+            )
+            desc_pay = desc if is_vb else f"Repasse {aco_id} - {cliente_nome}"
+            send_payment(
+                stakeholder_id=stakeholder_fornecedor,
+                vcto=vcto, desc=desc_pay, reference=reference,
+                category_id=CAT["REPASSES_OUT"], value=valor_dec,
+                costcenter_id=cc_id,
+            )
 
-        send_receipt(
-            stakeholder_id=stakeholder_cliente,
-            dt=dt_str, desc=desc, reference=reference,
-            category_id=CAT["REPASSES_IN"], value=float(valor_dec),
-            costcenter_id=cc_id,
-        )
+            qexec(f"UPDATE {TB['repassevr']} SET enviado = TRUE WHERE {PK_COL[TB['repassevr']]} = %s", [row["id"]])
+            processados += 1
 
-        # mantém sua descrição antiga pros não-VB; pro VB usa a descrição padrão (filial+obs+VB)
-        desc_pay = desc if is_vb else f"Repasse {aco_id} - {cliente_nome}"
-
-        send_payment(
-            stakeholder_id=stakeholder_fornecedor,
-            vcto=vcto, desc=desc_pay,
-            reference=reference, category_id=CAT["REPASSES_OUT"],
-            value=float(valor_dec), costcenter_id=cc_id,
-        )
-
-        qexec(f"UPDATE {TB['repassevr']} SET enviado = TRUE WHERE {PK_COL[TB['repassevr']]} = %s", [row["id"]])
-        processados += 1
+        except Exception as e:
+            messages.error(request, f"tb_repassevr id={row['id']} falhou: {e}")
 
     # ----------- tb_contapagar -----------
     for _id in ids_contapagar:
@@ -699,39 +650,42 @@ def enviar_remessa(request):
         if not row:
             continue
 
-        pgo_dt = row.get("pgo_data") or datetime.now()
-        if not isinstance(pgo_dt, datetime):
-            pgo_dt = datetime.combine(pgo_dt, datetime.min.time())
+        valor_cp = _to_dec(row.get("rec_ho"))
+        if valor_cp is None:
+            messages.warning(request, f"tb_contapagar id={row['id']} ignorado: valor zerado ou inválido.")
+            continue
 
-        cliente_nome = row.get("cliente_nome") or "Sem Nome"
-        cliente_doc  = only_digits(row.get("cliente_cpfcnpj") or "00000000000")
-        stakeholder_fornecedor = find_or_create_supplier(cliente_nome, cliente_doc)
+        try:
+            pgo_dt = row.get("pgo_data") or datetime.now()
+            if not isinstance(pgo_dt, datetime):
+                pgo_dt = datetime.combine(pgo_dt, datetime.min.time())
 
-        cc_id = map_costcenter_by_id_cob(row.get("credor_id") or row.get("credor_sigla")) or CC_PADRAO
-        vcto  = vcto_mais_15(pgo_dt)
-        obs   = _last_con_obs_by_pgo(row.get("pgo_id"))
-        desc  = _desc(row.get("filial_nome"), obs)
-        categoria = _categoria_cp_out_contapagar(row)
+            cliente_nome = row.get("cliente_nome") or "Sem Nome"
+            cliente_doc  = only_digits(row.get("cliente_cpfcnpj") or "00000000000")
+            stakeholder_fornecedor = find_or_create_supplier(cliente_nome, cliente_doc)
 
-        # >>> MUDOU AQUI: VB vai pra DESCRIÇÃO
-        vb_code = vb_code_only(row.get("credor_id"), row.get("filial_nome"))
-        if vb_code:
-            desc = f"{desc} {vb_code}"
+            cc_id     = map_costcenter_by_id_cob(row.get("credor_id") or row.get("credor_sigla")) or CC_PADRAO
+            vcto      = vcto_mais_15(pgo_dt)
+            obs       = _last_con_obs_by_pgo(row.get("pgo_id"))
+            desc      = _desc(row.get("filial_nome"), obs)
+            categoria = _categoria_cp_out_contapagar(row)
+            vb_code   = vb_code_only(row.get("credor_id"), row.get("filial_nome"))
+            if vb_code:
+                desc = f"{desc} {vb_code}"
 
-        # >>> MUDOU AQUI: referência = ope_nome (fallback p/ co_id)
-        ref_default = str(row.get("co_id") or "")
-        reference = str(row.get("ope_nome") or "").strip()
-        if not reference:
-            reference = ref_default
+            reference = str(row.get("ope_nome") or "").strip() or str(row.get("co_id") or "")
 
-        send_payment(
-            stakeholder_id=stakeholder_fornecedor,
-            vcto=vcto, desc=desc, reference=reference,
-            category_id=categoria, value=row.get("rec_ho"),
-            costcenter_id=cc_id,
-        )
-        qexec(f"UPDATE {TB['contapagar']} SET enviado = TRUE WHERE {PK_COL[TB['contapagar']]} = %s", [row["id"]])
-        processados += 1
+            send_payment(
+                stakeholder_id=stakeholder_fornecedor,
+                vcto=vcto, desc=desc, reference=reference,
+                category_id=categoria, value=valor_cp,
+                costcenter_id=cc_id,
+            )
+            qexec(f"UPDATE {TB['contapagar']} SET enviado = TRUE WHERE {PK_COL[TB['contapagar']]} = %s", [row["id"]])
+            processados += 1
+
+        except Exception as e:
+            messages.error(request, f"tb_contapagar id={row['id']} falhou: {e}")
 
     # ----------- tb_contareceber -----------
     for _id in ids_contareceber:
@@ -739,44 +693,52 @@ def enviar_remessa(request):
         if not row:
             continue
 
-        pgo_dt = row.get("pgo_data") or datetime.now()
-        if not isinstance(pgo_dt, datetime):
-            pgo_dt = datetime.combine(pgo_dt, datetime.min.time())
+        valor_cr = _to_dec(row.get("rec_ho"))
+        if valor_cr is None:
+            messages.warning(request, f"tb_contareceber id={row['id']} ignorado: valor zerado ou inválido.")
+            continue
 
-        cliente_nome = row.get("cliente_nome") or "Sem Nome"
-        cliente_doc  = only_digits(row.get("cliente_cpfcnpj") or "00000000000")
-        stakeholder_cliente = find_or_create_customer(cliente_nome, cliente_doc)
+        try:
+            pgo_dt = row.get("pgo_data") or datetime.now()
+            if not isinstance(pgo_dt, datetime):
+                pgo_dt = datetime.combine(pgo_dt, datetime.min.time())
 
-        cc_id    = map_costcenter_by_id_cob(row.get("credor_id") or row.get("credor_sigla")) or CC_PADRAO
-        dt_str   = pgo_dt.strftime("%Y-%m-%d")
-        obs = _last_con_obs_by_pgo(row.get("pgo_id"))
-        desc = _desc(row.get("filial_nome"), obs)
-        categoria = _categoria_cr_in_contareceber(row)
+            cliente_nome = row.get("cliente_nome") or "Sem Nome"
+            cliente_doc  = only_digits(row.get("cliente_cpfcnpj") or "00000000000")
+            stakeholder_cliente = find_or_create_customer(cliente_nome, cliente_doc)
 
-        # >>> MUDOU AQUI: VB vai pra DESCRIÇÃO
-        vb_code = vb_code_only(row.get("credor_id"), row.get("filial_nome"))
-        if vb_code:
-            desc = f"{desc} {vb_code}"
+            cc_id     = map_costcenter_by_id_cob(row.get("credor_id") or row.get("credor_sigla")) or CC_PADRAO
+            dt_str    = pgo_dt.strftime("%Y-%m-%d")
+            obs       = _last_con_obs_by_pgo(row.get("pgo_id"))
+            desc      = _desc(row.get("filial_nome"), obs)
+            categoria = _categoria_cr_in_contareceber(row)
+            vb_code   = vb_code_only(row.get("credor_id"), row.get("filial_nome"))
+            if vb_code:
+                desc = f"{desc} {vb_code}"
 
-        # >>> MUDOU AQUI: referência = ope_nome (fallback p/ co_id)
-        ref_default = str(row.get("co_id") or "")
-        reference = str(row.get("ope_nome") or "").strip()
-        if not reference:
-            reference = ref_default
+            reference = str(row.get("ope_nome") or "").strip() or str(row.get("co_id") or "")
 
-        send_receipt(
-            stakeholder_id=stakeholder_cliente,
-            dt=dt_str, desc=desc, reference=reference,
-            category_id=categoria, value=row.get("rec_ho"),
-            costcenter_id=cc_id,
-        )
-        qexec(f"UPDATE {TB['contareceber']} SET enviado = TRUE WHERE {PK_COL[TB['contareceber']]} = %s", [row["id"]])
-        processados += 1
+            send_receipt(
+                stakeholder_id=stakeholder_cliente,
+                dt=dt_str, desc=desc, reference=reference,
+                category_id=categoria, value=valor_cr,
+                costcenter_id=cc_id,
+            )
+            qexec(f"UPDATE {TB['contareceber']} SET enviado = TRUE WHERE {PK_COL[TB['contareceber']]} = %s", [row["id"]])
+            processados += 1
+
+        except Exception as e:
+            messages.error(request, f"tb_contareceber id={row['id']} falhou: {e}")
 
     # ----------- tb_despesa -----------
     for _id in ids_despesa:
         row = get_by_id(TB["despesa"], _id)
         if not row:
+            continue
+
+        valor_des = _to_dec(row.get("des_valor"))
+        if valor_des is None:
+            messages.warning(request, f"tb_despesa id={row['id']} ignorado: valor zerado ou inválido.")
             continue
 
         base = load_repasse_base_by_aco(row["aco_id"])
@@ -787,57 +749,53 @@ def enviar_remessa(request):
             )
             continue
 
-        pgo_dt = base.get("pgo_data")
-        if not pgo_dt:
-            messages.error(
-                request,
-                f"tb_despesa id={row['id']} (acordo {row['aco_id']}) sem data no repasseVR; não enviado."
+        try:
+            pgo_dt = base.get("pgo_data")
+            if not pgo_dt:
+                messages.error(
+                    request,
+                    f"tb_despesa id={row['id']} (acordo {row['aco_id']}) sem data no repasseVR; não enviado."
+                )
+                continue
+            if not isinstance(pgo_dt, datetime):
+                pgo_dt = datetime.combine(pgo_dt, datetime.min.time())
+
+            cliente_nome = base.get("cliente_nome") or "Sem Nome"
+            cliente_doc  = only_digits(base.get("cliente_cpfcnpj") or "00000000000")
+            stakeholder_cliente    = find_or_create_customer(cliente_nome, cliente_doc)
+            stakeholder_fornecedor = find_or_create_supplier(cliente_nome, cliente_doc)
+
+            cc_id   = map_costcenter_by_id_cob(base.get("credor_id") or base.get("credor_sigla")) or CC_PADRAO
+            dt_str  = pgo_dt.strftime("%Y-%m-%d")
+            desc    = _desc(base.get("filial_nome"), base.get("con_obs"))
+            aco_id  = row.get("aco_id")
+            vb_code = vb_code_only(base.get("credor_id"), base.get("filial_nome"))
+            is_vb   = bool(vb_code)
+            if is_vb:
+                desc = f"{desc} {vb_code}"
+
+            reference = str(base.get("ope_nome") or "").strip() or str(aco_id or "")
+
+            send_receipt(
+                stakeholder_id=stakeholder_cliente,
+                dt=dt_str, desc=desc, reference=reference,
+                category_id=CAT["REEMBOLSOS_IN"], value=valor_des,
+                costcenter_id=cc_id,
             )
-            continue
-        if not isinstance(pgo_dt, datetime):
-            pgo_dt = datetime.combine(pgo_dt, datetime.min.time())
+            vcto = (pgo_dt.date() + timedelta(days=15)).strftime("%Y-%m-%d")
+            desc_pay = desc if is_vb else f"Despesa {aco_id} - {cliente_nome}"
+            send_payment(
+                stakeholder_id=stakeholder_fornecedor,
+                vcto=vcto, desc=desc_pay, reference=reference,
+                category_id=CAT["GASTOS_REEMBOLSAVEIS_OUT"], value=valor_des,
+                costcenter_id=cc_id,
+            )
 
-        cliente_nome = base.get("cliente_nome") or "Sem Nome"
-        cliente_doc  = only_digits(base.get("cliente_cpfcnpj") or "00000000000")
-        stakeholder_cliente    = find_or_create_customer(cliente_nome, cliente_doc)
-        stakeholder_fornecedor = find_or_create_supplier(cliente_nome, cliente_doc)
+            qexec(f"UPDATE {TB['despesa']} SET enviado = TRUE WHERE {PK_COL[TB['despesa']]} = %s", [row["id"]])
+            processados += 1
 
-        cc_id  = map_costcenter_by_id_cob(base.get("credor_id") or base.get("credor_sigla")) or CC_PADRAO
-        dt_str = pgo_dt.strftime("%Y-%m-%d")
-        desc   = _desc(base.get("filial_nome"), base.get("con_obs"))
-        aco_id = row.get("aco_id")
-        valor  = row.get("des_valor")
-
-        # >>> MUDOU AQUI: VB vai pra DESCRIÇÃO
-        vb_code = vb_code_only(base.get("credor_id"), base.get("filial_nome"))
-        is_vb = bool(vb_code)
-        if is_vb:
-            desc = f"{desc} {vb_code}"
-
-        # >>> MUDOU AQUI: referência = ope_nome (fallback p/ aco_id)
-        reference = str(base.get("ope_nome") or "").strip()
-        if not reference:
-            reference = str(aco_id or "")
-
-        send_receipt(
-            stakeholder_id=stakeholder_cliente,
-            dt=dt_str, desc=desc, reference=reference,
-            category_id=CAT["REEMBOLSOS_IN"], value=valor,
-            costcenter_id=cc_id,
-        )
-        vcto = (pgo_dt.date() + timedelta(days=15)).strftime("%Y-%m-%d")
-
-        desc_pay = desc if is_vb else f"Despesa {aco_id} - {cliente_nome}"
-
-        send_payment(
-            stakeholder_id=stakeholder_fornecedor,
-            vcto=vcto, desc=desc_pay,
-            reference=reference, category_id=CAT["GASTOS_REEMBOLSAVEIS_OUT"],
-            value=valor, costcenter_id=cc_id,
-        )
-
-        qexec(f"UPDATE {TB['despesa']} SET enviado = TRUE WHERE {PK_COL[TB['despesa']]} = %s", [row["id"]])
-        processados += 1
+        except Exception as e:
+            messages.error(request, f"tb_despesa id={row['id']} falhou: {e}")
 
     messages.success(request, f"Remessa enviada. Registros processados: {processados}.")
     return redirect("nibo_panel:painel")
