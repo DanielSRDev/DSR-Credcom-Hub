@@ -5,7 +5,7 @@ from django.utils import timezone
 from django.contrib.auth import get_user_model
 from django.db.models import Q, Count
 
-from .models import Conversation, Message, ChatVinculoOperador, ChatPresence
+from .models import Conversation, Message, ChatVinculoOperador, ChatPresence, ChatBloqueio
 
 User = get_user_model()
 
@@ -19,6 +19,18 @@ def _in_group(user, name: str) -> bool:
     return user.groups.filter(name=name).exists()
 
 
+def _ids_bloqueados(user):
+    """
+    Retorna set de IDs de usuários bloqueados para este usuário.
+    Superuser não tem bloqueios aplicados.
+    """
+    if user.is_superuser:
+        return set()
+    bloqueados_como_a = ChatBloqueio.objects.filter(user_a=user).values_list("user_b_id", flat=True)
+    bloqueados_como_b = ChatBloqueio.objects.filter(user_b=user).values_list("user_a_id", flat=True)
+    return set(bloqueados_como_a) | set(bloqueados_como_b)
+
+
 def allowed_contacts(user):
     """
     Regras de contato:
@@ -26,8 +38,16 @@ def allowed_contacts(user):
     - Supervisor: fala com outros supervisores + coordenação + sua equipe vinculada.
     - Operação: fala com TODOS os seus supervisores vinculados + coordenação.
                 Se não tiver nenhum vínculo, fala apenas com a coordenação.
+
+    Em todos os casos, pares com ChatBloqueio são excluídos — bidirecional.
+    Superuser não é afetado por bloqueios.
     """
     qs = User.objects.filter(is_active=True).exclude(id=user.id)
+
+    # Aplica bloqueios individuais (superuser fica isento)
+    bloqueados = _ids_bloqueados(user)
+    if bloqueados:
+        qs = qs.exclude(id__in=bloqueados)
 
     is_coord = _in_group(user, "OPERACAO_CORDENACAO")
     is_sup = _in_group(user, "OPERACAO_SUPERVISOR")
@@ -48,13 +68,11 @@ def allowed_contacts(user):
     if is_oper:
         coord_ids = User.objects.filter(groups__name="OPERACAO_CORDENACAO").values_list("id", flat=True)
 
-        # Busca TODOS os supervisores vinculados ao operador (era .first() antes)
         supervisor_ids = ChatVinculoOperador.objects.filter(
             operador=user
         ).values_list("supervisor_id", flat=True)
 
         if not supervisor_ids:
-            # Sem vínculo algum: acessa apenas coordenação
             return qs.filter(id__in=coord_ids)
 
         return qs.filter(
@@ -65,6 +83,12 @@ def allowed_contacts(user):
 
 
 def can_send_to(me, other) -> bool:
+    """
+    Verifica se 'me' pode enviar mensagem para 'other'.
+    Bloqueio bidirecional: se o par está bloqueado, nenhum dos dois pode enviar.
+    """
+    if ChatBloqueio.existe(me, other) and not me.is_superuser:
+        return False
     return allowed_contacts(me).filter(id=other.id).exists()
 
 

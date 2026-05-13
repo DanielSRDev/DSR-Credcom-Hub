@@ -129,6 +129,7 @@ FILIAIS_50 = {
     "PARQUE AMAZONAS 65",
     "JARDIM MILAO 61",
     "JD MADRI",
+    "JARDIM BOUGAINVILLE",
 }
 
 # ============================================================

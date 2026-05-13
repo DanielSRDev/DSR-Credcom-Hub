@@ -96,8 +96,11 @@ class TarefaForm(forms.ModelForm):
         # SUPERVISOR -> membros da equipe dele + ele mesmo
         # =====================================================
         if is_supervisor(user):
+            # ------------------------------------------------------------------
+            # ALTERADO: supervisor (FK) -> supervisores (M2M)
+            # ------------------------------------------------------------------
             equipes_do_supervisor = Equipe.objects.filter(
-                supervisor=user,
+                supervisores=user,
                 ativa=True,
             )
 
@@ -111,18 +114,24 @@ class TarefaForm(forms.ModelForm):
                 .distinct()
                 .order_by("username")
             )
+            # ------------------------------------------------------------------
             return
 
         # =====================================================
         # OPERADOR -> somente supervisor(es) da equipe dele
         # =====================================================
         if is_operador(user):
+            # ------------------------------------------------------------------
+            # ALTERADO: supervisor_id (FK) -> supervisores (M2M)
+            # select_related removido (não se aplica a M2M).
+            # supervisores_ids agora vem da relação M2M diretamente.
+            # ------------------------------------------------------------------
             equipes_do_operador = Equipe.objects.filter(
                 membros=user,
                 ativa=True,
-            ).select_related("supervisor")
+            )
 
-            supervisores_ids = equipes_do_operador.values_list("supervisor_id", flat=True)
+            supervisores_ids = equipes_do_operador.values_list("supervisores__id", flat=True)
 
             self.fields["atribuida_para"].queryset = (
                 User.objects.filter(
@@ -132,6 +141,7 @@ class TarefaForm(forms.ModelForm):
                 .distinct()
                 .order_by("username")
             )
+            # ------------------------------------------------------------------
             return
 
         # fallback

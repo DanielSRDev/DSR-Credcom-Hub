@@ -9,6 +9,7 @@ from .models import (
     Message,
     ChatVinculoOperador,
     ChatMonitorConfig,
+    ChatBloqueio,
 )
 
 User = get_user_model()
@@ -137,3 +138,42 @@ except admin.sites.NotRegistered:
 @admin.register(User)
 class CustomUserAdmin(DjangoUserAdmin):
     inlines = [ChatMonitorConfigInline, ChatVinculoOperadorInline]
+
+@admin.register(ChatBloqueio)
+class ChatBloqueioAdmin(admin.ModelAdmin):
+    list_display = ("par_display", "motivo", "criado_em")
+    search_fields = ("user_a__username", "user_a__first_name", "user_b__username", "user_b__first_name", "motivo")
+    readonly_fields = ("criado_em",)
+    autocomplete_fields = ("user_a", "user_b")
+    ordering = ("user_a__username",)
+
+    fieldsets = (
+        (None, {
+            "fields": ("user_a", "user_b", "motivo"),
+            "description": (
+                "Bloqueio bidirecional: nenhum dos dois aparece na lista do outro "                "e nenhum consegue enviar mensagem. Superuser não é afetado."
+            ),
+        }),
+        ("Auditoria", {
+            "fields": ("criado_em",),
+            "classes": ("collapse",),
+        }),
+    )
+
+    @admin.display(description="Par bloqueado")
+    def par_display(self, obj):
+        from django.utils.html import format_html
+        return format_html(
+            "<strong>{}</strong> &nbsp;↔&nbsp; <strong>{}</strong>",
+            obj.user_a.get_full_name() or obj.user_a.username,
+            obj.user_b.get_full_name() or obj.user_b.username,
+        )
+
+    def save_model(self, request, obj, form, change):
+        """
+        Garante user_a_id < user_b_id ao salvar pelo admin,
+        independente da ordem escolhida pelo operador.
+        """
+        if obj.user_a_id and obj.user_b_id and obj.user_a_id > obj.user_b_id:
+            obj.user_a_id, obj.user_b_id = obj.user_b_id, obj.user_a_id
+        super().save_model(request, obj, form, change)

@@ -29,15 +29,23 @@
 
         {% if user.is_authenticated %}
 
-          {% if user|has_any_group:"OPERACAO,OPERACAO_SUPERVISOR,OPERACAO_CORDENACAO" %}
+          {% if pode_ver_operacao %}
             <a class="btn btn-light btn-sm" href="/operacao/">Operação</a>
           {% endif %}
 
-          {% if user|has_any_group:"GESTAO,OPERACAO_SUPERVISOR,OPERACAO_CORDENACAO" %}
+          {% if pode_ver_painel_operacao %}
+            <a class="btn btn-light btn-sm" href="/operacao/painel/">Painel</a>
+          {% endif %}
+
+          {% if pode_ver_gestao %}
             <a class="btn btn-light btn-sm" href="/gestao/">Gestão</a>
           {% endif %}
 
-          {% if user|has_any_group:"NIBO,OPERACAO_SUPERVISOR,OPERACAO_CORDENACAO" %}
+          {% if pode_ver_zapmsg %}
+            <a class="btn btn-light btn-sm" href="/zapmsg/">ZapMsg</a>
+          {% endif %}
+
+          {% if pode_ver_nibo %}
             <a class="btn btn-light btn-sm" href="/nibo/">Nibo</a>
           {% endif %}
 
