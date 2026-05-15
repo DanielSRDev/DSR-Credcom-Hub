@@ -10,6 +10,7 @@ from .models import (
     ChatVinculoOperador,
     ChatMonitorConfig,
     ChatBloqueio,
+    ChatLiberacao,
 )
 
 User = get_user_model()
@@ -17,19 +18,19 @@ User = get_user_model()
 
 @admin.register(ChatVinculoOperador)
 class ChatVinculoOperadorAdmin(admin.ModelAdmin):
-    list_display = ("operador", "supervisor", "criado_em")
+    list_display  = ("operador", "supervisor", "criado_em")
     search_fields = ("operador__username", "supervisor__username")
 
 
 @admin.register(Conversation)
 class ConversationAdmin(admin.ModelAdmin):
-    list_display = ("id", "user1", "user2", "criada_em")
+    list_display  = ("id", "user1", "user2", "criada_em")
     search_fields = ("user1__username", "user2__username")
 
 
 class Usuario1Filter(admin.SimpleListFilter):
-    title = "Usuário 1"
-    parameter_name = "u1"
+    title           = "Usuário 1"
+    parameter_name  = "u1"
 
     def lookups(self, request, model_admin):
         return [(u.username, u.username) for u in User.objects.all().order_by("username")]
@@ -39,8 +40,8 @@ class Usuario1Filter(admin.SimpleListFilter):
 
 
 class Usuario2Filter(admin.SimpleListFilter):
-    title = "Usuário 2"
-    parameter_name = "u2"
+    title           = "Usuário 2"
+    parameter_name  = "u2"
 
     def lookups(self, request, model_admin):
         return [(u.username, u.username) for u in User.objects.all().order_by("username")]
@@ -91,39 +92,26 @@ def exportar_conversa(modeladmin, request, queryset):
 
 @admin.register(Message)
 class MessageAdmin(admin.ModelAdmin):
-    list_display = ("id", "conversation", "sender", "criado_em", "lido_em")
+    list_display  = ("id", "conversation", "sender", "criado_em", "lido_em")
     search_fields = ("texto", "sender__username", "conversation__user1__username", "conversation__user2__username")
-    list_filter = ("criado_em", Usuario1Filter, Usuario2Filter)
-    actions = [exportar_conversa]
+    list_filter   = ("criado_em", Usuario1Filter, Usuario2Filter)
+    actions       = [exportar_conversa]
 
 
 class ChatMonitorConfigInline(admin.StackedInline):
-    model = ChatMonitorConfig
+    model      = ChatMonitorConfig
     can_delete = False
-    extra = 0
+    extra      = 0
 
 
 class ChatVinculoOperadorInline(admin.TabularInline):
     """
     Inline para gerenciar os vínculos operador -> supervisor(es)
     diretamente na página do usuário no admin.
-
-    Usa TabularInline (em vez do antigo StackedInline via OneToOne)
-    porque agora um operador pode ter múltiplos supervisores.
-
-    fk_name="operador" é obrigatório: o model tem duas FKs para User
-    (operador e supervisor), então o Django precisa saber qual delas
-    âncora o inline ao usuário que está sendo editado.
-
-    raw_id_fields no lugar de autocomplete_fields: o autocomplete exige
-    que o ModelAdmin do User referenciado exponha search_fields de forma
-    validada pelo Django — a cadeia unregister+register customizado
-    pode quebrar essa validação e suprimir o botão "Adicionar outro".
-    raw_id_fields é mais robusto e sempre renderiza o botão corretamente.
     """
-    model = ChatVinculoOperador
-    fk_name = "operador"
-    extra = 1
+    model        = ChatVinculoOperador
+    fk_name      = "operador"
+    extra        = 1
     verbose_name = "Supervisor vinculado"
     verbose_name_plural = "Supervisores vinculados"
     raw_id_fields = ["supervisor"]
@@ -139,19 +127,40 @@ except admin.sites.NotRegistered:
 class CustomUserAdmin(DjangoUserAdmin):
     inlines = [ChatMonitorConfigInline, ChatVinculoOperadorInline]
 
+
+# ──────────────────────────────────────────────────────────────────────────────
+# ChatBloqueio
+# ──────────────────────────────────────────────────────────────────────────────
+
 @admin.register(ChatBloqueio)
 class ChatBloqueioAdmin(admin.ModelAdmin):
-    list_display = ("par_display", "motivo", "criado_em")
-    search_fields = ("user_a__username", "user_a__first_name", "user_b__username", "user_b__first_name", "motivo")
-    readonly_fields = ("criado_em",)
+    list_display    = ("par_display", "motivo", "criado_em")
+    search_fields   = (
+        "user_a__username", "user_a__first_name",
+        "user_b__username", "user_b__first_name",
+        "motivo",
+    )
+    readonly_fields     = ("criado_em",)
     autocomplete_fields = ("user_a", "user_b")
-    ordering = ("user_a__username",)
+    ordering            = ("user_a__username",)
+    actions             = ["liberar_chat"]
+
+    @admin.action(description="✅ Liberar chat entre os usuários selecionados")
+    def liberar_chat(self, request, queryset):
+        total = queryset.count()
+        queryset.delete()
+        self.message_user(
+            request,
+            f"{total} bloqueio(s) removido(s). O chat entre os pares foi liberado.",
+            level="success",
+        )
 
     fieldsets = (
         (None, {
             "fields": ("user_a", "user_b", "motivo"),
             "description": (
-                "Bloqueio bidirecional: nenhum dos dois aparece na lista do outro "                "e nenhum consegue enviar mensagem. Superuser não é afetado."
+                "Bloqueio bidirecional: nenhum dos dois aparece na lista do outro "
+                "e nenhum consegue enviar mensagem. Superuser não é afetado."
             ),
         }),
         ("Auditoria", {
@@ -170,10 +179,63 @@ class ChatBloqueioAdmin(admin.ModelAdmin):
         )
 
     def save_model(self, request, obj, form, change):
-        """
-        Garante user_a_id < user_b_id ao salvar pelo admin,
-        independente da ordem escolhida pelo operador.
-        """
+        if obj.user_a_id and obj.user_b_id and obj.user_a_id > obj.user_b_id:
+            obj.user_a_id, obj.user_b_id = obj.user_b_id, obj.user_a_id
+        super().save_model(request, obj, form, change)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# ChatLiberacao
+# ──────────────────────────────────────────────────────────────────────────────
+
+@admin.register(ChatLiberacao)
+class ChatLiberacaoAdmin(admin.ModelAdmin):
+    list_display    = ("par_display", "motivo", "criado_em")
+    search_fields   = (
+        "user_a__username", "user_a__first_name",
+        "user_b__username", "user_b__first_name",
+        "motivo",
+    )
+    readonly_fields     = ("criado_em",)
+    autocomplete_fields = ("user_a", "user_b")
+    ordering            = ("user_a__username",)
+    actions             = ["revogar_liberacao"]
+
+    @admin.action(description="🚫 Revogar liberação entre os usuários selecionados")
+    def revogar_liberacao(self, request, queryset):
+        total = queryset.count()
+        queryset.delete()
+        self.message_user(
+            request,
+            f"{total} liberação(ões) revogada(s). As regras de cargo voltam a valer.",
+            level="warning",
+        )
+
+    fieldsets = (
+        (None, {
+            "fields": ("user_a", "user_b", "motivo"),
+            "description": (
+                "Liberação bidirecional: os dois se enxergam e podem trocar mensagens, "
+                "independente do cargo ou grupo. "
+                "Tem precedência sobre bloqueios: se existir liberação, o bloqueio é ignorado."
+            ),
+        }),
+        ("Auditoria", {
+            "fields": ("criado_em",),
+            "classes": ("collapse",),
+        }),
+    )
+
+    @admin.display(description="Par liberado")
+    def par_display(self, obj):
+        from django.utils.html import format_html
+        return format_html(
+            "<strong>{}</strong> &nbsp;↔&nbsp; <strong>{}</strong>",
+            obj.user_a.get_full_name() or obj.user_a.username,
+            obj.user_b.get_full_name() or obj.user_b.username,
+        )
+
+    def save_model(self, request, obj, form, change):
         if obj.user_a_id and obj.user_b_id and obj.user_a_id > obj.user_b_id:
             obj.user_a_id, obj.user_b_id = obj.user_b_id, obj.user_a_id
         super().save_model(request, obj, form, change)

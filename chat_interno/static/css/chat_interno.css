@@ -297,3 +297,79 @@
   line-height: 1.4;
   opacity: 0.95;
 }
+/* ============================= */
+/* FIX 4: DESTAQUE NÃO LIDOS     */
+/* ============================= */
+
+/* Card com fundo destacado para conversas com mensagens nao lidas
+   Especificidade alta para sobrepor Bootstrap list-group-item-action */
+.chat-panel #chatUserList button.list-group-item.chat-item-unread,
+#chatUserList button.list-group-item.chat-item-unread {
+  background-color: #fff3cd !important;
+  border-left: 4px solid #f59e0b !important;
+}
+
+.chat-panel #chatUserList button.list-group-item.chat-item-unread:hover,
+#chatUserList button.list-group-item.chat-item-unread:hover {
+  background-color: #fde68a !important;
+}
+
+/* Garante que o active nao apaga o destaque de nao lido */
+#chatUserList button.list-group-item.chat-item-unread.active {
+  background-color: #e9f2ff !important;
+  border-left: 4px solid #2f7df6 !important;
+}
+
+/* Badge de contagem de não lidos */
+.chat-unread-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #ef4444;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+/* Dots de presença */
+.chat-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.chat-dot-online  { background: #22c55e; }
+.chat-dot-ausente { background: #eab308; }
+.chat-dot-offline { background: #9ca3af; }
+
+/* ============================= */
+/* FIX 2: TEXTAREA AUTO-RESIZE   */
+/* ============================= */
+
+#chatInput {
+  resize: none !important;
+  overflow: hidden !important;
+  min-height: 32px;
+  max-height: 120px;
+  overflow-y: auto !important;
+  line-height: 1.4;
+  transition: height 0.1s ease;
+}
+
+/* ============================= */
+/* FIX 5: PREVIEW IMAGEM COLADA  */
+/* ============================= */
+
+#chatFileHint {
+  margin-top: 4px;
+}
+
+#chatPastePreview img {
+  object-fit: contain;
+}

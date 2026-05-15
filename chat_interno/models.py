@@ -45,69 +45,49 @@ class Message(models.Model):
 class ChatVinculoOperador(models.Model):
     """
     Vínculo OPERACAO -> Supervisor(es) responsável(is).
-
     Um operador pode ter múltiplos supervisores vinculados.
-    A unicidade é garantida pelo par (operador, supervisor),
-    impedindo vínculos duplicados para o mesmo par.
     """
-    operador = models.ForeignKey(
-        User,
-        on_delete=models.CASCADE,
-        related_name="chat_vinculos_operador",   # era: chat_vinculo_operador (OneToOne)
-    )
-    supervisor = models.ForeignKey(
-        User,
-        on_delete=models.CASCADE,
-        related_name="chat_supervisionados",
-    )
-    criado_em = models.DateTimeField(auto_now_add=True)
+    operador   = models.ForeignKey(User, on_delete=models.CASCADE, related_name="vinculos_como_operador")
+    supervisor = models.ForeignKey(User, on_delete=models.CASCADE, related_name="vinculos_como_supervisor")
+    criado_em  = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         constraints = [
-            models.UniqueConstraint(
-                fields=["operador", "supervisor"],
-                name="uniq_chat_vinculo_operador_supervisor",
-            ),
+            models.UniqueConstraint(fields=["operador", "supervisor"], name="uniq_vinculo_operador_supervisor"),
         ]
-        verbose_name = "Vínculo operador-supervisor"
+        verbose_name        = "Vínculo operador-supervisor"
         verbose_name_plural = "Vínculos operador-supervisor"
 
     def __str__(self):
-        return f"{self.operador} -> {self.supervisor}"
+        return f"{self.operador} → {self.supervisor}"
 
 
 class ChatPresence(models.Model):
-
     class Status(models.TextChoices):
-        ONLINE = "online", "Online"
+        ONLINE  = "online",  "Online"
         AUSENTE = "ausente", "Ausente"
         OFFLINE = "offline", "Offline"
 
-    user = models.OneToOneField(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name="chat_presence"
-    )
-
-    status = models.CharField(
-        max_length=10,
-        choices=Status.choices,
-        default=Status.OFFLINE
-    )
-
+    user       = models.OneToOneField(User, on_delete=models.CASCADE, related_name="chat_presence")
+    status     = models.CharField(max_length=10, choices=Status.choices, default=Status.OFFLINE)
     updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.user} [{self.status}]"
 
 
 class ChatMonitorConfig(models.Model):
-    user = models.OneToOneField(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name="chat_monitor_config"
-    )
-    can_monitor = models.BooleanField(default=False)
+    user           = models.OneToOneField(User, on_delete=models.CASCADE, related_name="chat_monitor_config")
+    monitorado     = models.BooleanField(default=False)
+    notificar_fone = models.CharField(max_length=20, blank=True, default="")
+
+    class Meta:
+        verbose_name        = "Configuração de monitor"
+        verbose_name_plural = "Configurações de monitor"
 
     def __str__(self):
-        return f"{self.user} monitor={self.can_monitor}"
+        return f"Monitor: {self.user}"
+
 
 class ChatBloqueio(models.Model):
     """
@@ -115,62 +95,80 @@ class ChatBloqueio(models.Model):
 
     Se existir um registro (user_a, user_b), nenhum dos dois
     aparece na lista de contatos do outro e nenhum consegue
-    enviar mensagem para o outro — independente do cargo/grupo.
+    enviar mensagem — independente do cargo/grupo.
 
-    Sempre gravamos user_a_id < user_b_id para evitar duplicidade
-    (mesma convenção usada em Conversation).
-
-    Superuser não é afetado — vê e fala com todos.
+    Sempre gravamos user_a_id < user_b_id para evitar duplicidade.
+    Superuser não é afetado.
     """
-    user_a = models.ForeignKey(
-        User,
-        on_delete=models.CASCADE,
-        related_name="chat_bloqueios_como_a",
-        verbose_name="Usuário A",
-    )
-    user_b = models.ForeignKey(
-        User,
-        on_delete=models.CASCADE,
-        related_name="chat_bloqueios_como_b",
-        verbose_name="Usuário B",
-    )
-    motivo = models.CharField(
-        max_length=255,
-        blank=True,
-        verbose_name="Motivo (opcional)",
-        help_text="Registro interno — não exibido aos usuários.",
-    )
+    user_a    = models.ForeignKey(User, on_delete=models.CASCADE, related_name="chat_bloqueios_como_a", verbose_name="Usuário A")
+    user_b    = models.ForeignKey(User, on_delete=models.CASCADE, related_name="chat_bloqueios_como_b", verbose_name="Usuário B")
+    motivo    = models.CharField(max_length=255, blank=True, verbose_name="Motivo (opcional)")
     criado_em = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        verbose_name = "Bloqueio de chat entre usuários"
+        verbose_name        = "Bloqueio de chat entre usuários"
         verbose_name_plural = "Bloqueios de chat entre usuários"
-        constraints = [
-            models.UniqueConstraint(
-                fields=["user_a", "user_b"],
-                name="uniq_chat_bloqueio_par",
-            ),
+        ordering            = ["user_a__username", "user_b__username"]
+        constraints         = [
+            models.UniqueConstraint(fields=["user_a", "user_b"], name="uniq_chat_bloqueio_par"),
         ]
-        ordering = ["user_a__username", "user_b__username"]
 
     def __str__(self):
-        return f"{self.user_a.username} ↔ {self.user_b.username} (bloqueado)"
+        return f"Bloqueio: {self.user_a} ↔ {self.user_b}"
 
     @classmethod
     def criar(cls, user1, user2, motivo=""):
-        """
-        Cria o bloqueio garantindo que user_a_id < user_b_id.
-        Usa get_or_create para ser idempotente.
-        """
         a, b = (user1, user2) if user1.id < user2.id else (user2, user1)
-        obj, created = cls.objects.get_or_create(
-            user_a=a, user_b=b,
-            defaults={"motivo": motivo},
-        )
+        obj, created = cls.objects.get_or_create(user_a=a, user_b=b, defaults={"motivo": motivo})
         return obj, created
 
     @classmethod
     def existe(cls, user1, user2) -> bool:
-        """Verifica se o par está bloqueado (em qualquer ordem)."""
+        a_id, b_id = sorted([user1.id, user2.id])
+        return cls.objects.filter(user_a_id=a_id, user_b_id=b_id).exists()
+
+
+class ChatLiberacao(models.Model):
+    """
+    Liberação explícita de chat entre dois usuários.
+
+    Fura a regra de cargo/grupo: se existir um registro (user_a, user_b),
+    os dois se enxergam na lista de contatos e podem trocar mensagens,
+    independente dos grupos a que pertencem.
+
+    Exemplos de uso:
+    - Operador que precisa falar diretamente com um gestor.
+    - Dois usuários de grupos distintos que precisam se comunicar pontualmente.
+
+    Sempre gravamos user_a_id < user_b_id para evitar duplicidade.
+    Superuser não precisa de liberação — já vê todos.
+
+    PRIORIDADE: ChatLiberacao tem precedência sobre ChatBloqueio.
+    Se existir liberação entre A e B, o bloqueio é ignorado.
+    """
+    user_a    = models.ForeignKey(User, on_delete=models.CASCADE, related_name="chat_liberacoes_como_a", verbose_name="Usuário A")
+    user_b    = models.ForeignKey(User, on_delete=models.CASCADE, related_name="chat_liberacoes_como_b", verbose_name="Usuário B")
+    motivo    = models.CharField(max_length=255, blank=True, verbose_name="Motivo (opcional)")
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name        = "Liberação de chat entre usuários"
+        verbose_name_plural = "Liberações de chat entre usuários"
+        ordering            = ["user_a__username", "user_b__username"]
+        constraints         = [
+            models.UniqueConstraint(fields=["user_a", "user_b"], name="uniq_chat_liberacao_par"),
+        ]
+
+    def __str__(self):
+        return f"Liberação: {self.user_a} ↔ {self.user_b}"
+
+    @classmethod
+    def criar(cls, user1, user2, motivo=""):
+        a, b = (user1, user2) if user1.id < user2.id else (user2, user1)
+        obj, created = cls.objects.get_or_create(user_a=a, user_b=b, defaults={"motivo": motivo})
+        return obj, created
+
+    @classmethod
+    def existe(cls, user1, user2) -> bool:
         a_id, b_id = sorted([user1.id, user2.id])
         return cls.objects.filter(user_a_id=a_id, user_b_id=b_id).exists()

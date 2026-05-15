@@ -83,6 +83,7 @@ CONTRATANTE_MAP = {
     "+VGV":   "Mais VGV",
     "VILA":   "Vila Brasil",
     "GPL":    "GPL",
+    "HB":    "HB CONSTRUTORA",
 }
 
 
@@ -723,9 +724,16 @@ def exportar_relatorio_geral_view(request):
             df["filial"] = df["filial"].apply(limpar_filial_exportacao)
 
         def calcular_status_real(row):
-            if row.get("valor_pago", 0) and row.get("valor_pago", 0) > 0:
+            status_acordo = row.get("status_acordo")
+            if eh_status_pago(status_acordo):
                 return "PAGO"
-            if row.get("valor_avencer", 0) and row.get("valor_avencer", 0) > 0:
+
+            valor_pago = row.get("valor_pago", 0) or 0
+            valor_avencer = row.get("valor_avencer", 0) or 0
+
+            if valor_pago > 0:
+                return "PAGO"
+            if valor_avencer > 0:
                 return "AVENCER"
             return "QUEBRA"
 

@@ -144,6 +144,10 @@ def history(request, user_id: int):
             {
                 "id": m.id,
                 "sender_id": m.sender_id,
+                "sender_name": (
+                    m.sender.get_full_name() or m.sender.get_username()
+                    if m.sender else "Contato"
+                ),
                 "texto": m.texto or "",
                 "imagem_url": (m.imagem.url if getattr(m, "imagem", None) else None),
                 "criado_em": m.criado_em.isoformat(),
