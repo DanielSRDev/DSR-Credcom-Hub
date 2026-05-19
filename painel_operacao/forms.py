@@ -89,33 +89,45 @@ class AcompanhamentoGeralFiltroForm(forms.Form):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
+        # ---------------------------------------------------------------
+        # CORREÇÃO: popula operador e credor com os valores reais que
+        # existem em PainelOperacaoRelatorioGeral — mesma fonte que
+        # aplicar_filtros_relatorio usa para filtrar.
+        # Antes usava CarteiraSupervisor.credor_nome (nome cadastrado no
+        # admin), que pode divergir do valor gravado via ETL no campo
+        # PainelOperacaoRelatorioGeral.credor, fazendo o filtro nunca bater.
+        # ---------------------------------------------------------------
+
         cre_ids_vinculados = list(
             CarteiraSupervisor.objects
             .filter(ativo=True, supervisor__ativo=True)
             .values_list("cre_id", flat=True)
         )
 
+        # Base restrita às carteiras vinculadas a supervisores ativos
         base_relatorio = (
             PainelOperacaoRelatorioGeral.objects
             .filter(cre_id__in=cre_ids_vinculados)
-            .exclude(emitido_por_nome__isnull=True)
-            .exclude(emitido_por_nome__exact="")
         )
 
         operadores = (
             base_relatorio
+            .exclude(emitido_por_nome__isnull=True)
+            .exclude(emitido_por_nome__exact="")
             .values_list("emitido_por_nome", flat=True)
             .distinct()
             .order_by("emitido_por_nome")
         )
         self.fields["operador"].choices = [("", "Todos")] + [(op, op) for op in operadores]
 
+        # USA PainelOperacaoRelatorioGeral.credor — valor real do ETL —
+        # em vez de CarteiraSupervisor.credor_nome
         credores = (
-            CarteiraSupervisor.objects
-            .filter(ativo=True, supervisor__ativo=True)
-            .exclude(credor_nome__exact="")
-            .values_list("credor_nome", flat=True)
+            base_relatorio
+            .exclude(credor__isnull=True)
+            .exclude(credor__exact="")
+            .values_list("credor", flat=True)
             .distinct()
-            .order_by("credor_nome")
+            .order_by("credor")
         )
         self.fields["credor"].choices = [("", "Todas")] + [(c, c) for c in credores]
