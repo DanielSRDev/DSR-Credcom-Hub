@@ -8,18 +8,33 @@
 .g-title{ margin:0; font-weight:800; letter-spacing:-0.5px; }
 .g-sub{ color:#6c757d; font-size:.95rem; }
 
+/* ================== GRID ================== */
+/* Agora são 5 colunas: abertas / executando / executado / PENDENTE / finalizadas */
+.g-grid-5{
+  display:grid;
+  grid-template-columns: 1fr 1fr 1fr 1fr 1fr;
+  gap:18px;
+}
+@media (max-width: 1400px){
+  .g-grid-5{ grid-template-columns: 1fr 1fr 1fr; }
+}
+@media (max-width: 900px){
+  .g-grid-5{ grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 600px){
+  .g-grid-5{ grid-template-columns: 1fr; }
+}
+
+/* mantém a classe antiga para não quebrar nada legado */
 .g-grid-4{
   display:grid;
   grid-template-columns: 1fr 1fr 1fr 1fr;
   gap:18px;
 }
-@media (max-width: 1200px){
-  .g-grid-4{ grid-template-columns: 1fr 1fr; }
-}
-@media (max-width: 768px){
-  .g-grid-4{ grid-template-columns: 1fr; }
-}
+@media (max-width: 1200px){ .g-grid-4{ grid-template-columns: 1fr 1fr; } }
+@media (max-width: 768px){  .g-grid-4{ grid-template-columns: 1fr; } }
 
+/* ================== COLUNAS ================== */
 .g-col{
   background: #f8f9fa;
   border: 1px solid rgba(0,0,0,.08);
@@ -33,9 +48,16 @@
   padding: 6px 6px 12px;
 }
 
+/* coluna pendente recebe destaque sutil no fundo */
+.g-col.col-pendente{
+  background: #fffbeb;
+  border-color: #fcd34d;
+}
+
 .g-list{ display:flex; flex-direction:column; gap:12px; min-height: 40px; }
 .g-empty{ padding:14px; color:#6c757d; }
 
+/* ================== CARD BASE ================== */
 .g-card{
   border-radius: 16px;
   background: #fff;
@@ -92,6 +114,17 @@
   margin-right:8px;
 }
 
+/* ================== CÓDIGO DO CARD ================== */
+.g-card-codigo{
+  font-size:.72rem;
+  font-weight:700;
+  color:#6c757d;
+  font-family: monospace;
+  letter-spacing:.03em;
+  padding: 0 12px 2px;
+}
+
+/* ================== CONTEÚDO ================== */
 .g-card-desc{
   padding: 0 12px 8px;
   color:#333;
@@ -123,34 +156,154 @@
   border-top: 1px solid rgba(0,0,0,.06);
 }
 
-/* estados base */
-.g-card.ok{ border-left: 6px solid rgba(13,110,253,.9); background: rgba(13,110,253,.03); }
-.g-card.warn{ border-left: 6px solid rgba(255,193,7,.9); background: rgba(255,193,7,.06); }
-.g-card.late{ border-left: 6px solid rgba(220,53,69,.9); background: rgba(220,53,69,.06); }
-.g-card.prio{ box-shadow: 0 0 0 2px rgba(111,66,193,.2) inset; }
+/* ================== ESTADOS DE COR ================== */
+.g-card.ok{   border-left: 6px solid rgba(13,110,253,.9);  background: rgba(13,110,253,.03); }
+.g-card.warn{ border-left: 6px solid rgba(255,193,7,.9);   background: rgba(255,193,7,.06); }
+.g-card.late{ border-left: 6px solid rgba(220,53,69,.9);   background: rgba(220,53,69,.06); }
 
-/* FINALIZADA (verde padrão) */
-.g-card.done{
-  border-left: 6px solid rgba(25,135,84,.9);
-  background: rgba(25,135,84,.06);
-}
-
-/* EXECUTANDO (verde bem claro) */
+/* EXECUTANDO (verde água — normal) */
 .g-card.exec{
   border-left: 6px solid #20c997;
   background: #e9fbf4;
 }
 
-/* EXECUTADO (rosa) */
+/* EXECUTANDO após devolução — laranja forte, executor sabe que precisa refazer */
+.g-card.exec-devolvido{
+  border: 2px solid #f97316;
+  border-left: 6px solid #ea580c;
+  background: #fff7ed;
+  box-shadow: 0 0 0 3px rgba(249,115,22,.15);
+}
+.g-card.exec-devolvido .g-card-bottom{
+  background: #ffedd5;
+  border-top: 1px solid #fed7aa;
+}
+
+/* Badge "Refazer" que aparece no card devolvido */
+.g-badge-refazer{
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: .72rem;
+  font-weight: 800;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: #f97316;
+  color: #fff;
+  letter-spacing: .03em;
+}
+
+/* EXECUTADO (rosa — padrão, aguardando outro) */
 .g-card.donebyexec{
   border-left: 6px solid #d63384;
   background: #fde7f3;
 }
 
+/* EXECUTADO aguardando SUA validação — destaque forte */
+.g-card.aguarda-validacao{
+  border: 2px solid #f59e0b;
+  border-left: 6px solid #d97706;
+  background: #fffbeb;
+  box-shadow: 0 0 0 3px rgba(245,158,11,.18), 0 2px 12px rgba(245,158,11,.15);
+  animation: pulse-validacao 2.5s ease-in-out infinite;
+}
+.g-card.aguarda-validacao .g-card-bottom{
+  background: #fef3c7;
+  border-top: 1px solid #fcd34d;
+}
+@keyframes pulse-validacao {
+  0%,100%{ box-shadow: 0 0 0 3px rgba(245,158,11,.18), 0 2px 12px rgba(245,158,11,.10); }
+  50%{     box-shadow: 0 0 0 5px rgba(245,158,11,.30), 0 4px 18px rgba(245,158,11,.25); }
+}
 
-/* ================= PRIORIDADE SEMPRE VENCE ================= */
+/* Badge "Validar agora" que aparece no card aguardando */
+.g-badge-validar{
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: .72rem;
+  font-weight: 800;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: #f59e0b;
+  color: #fff;
+  letter-spacing: .03em;
+  animation: badge-blink 1.8s ease-in-out infinite;
+}
+@keyframes badge-blink {
+  0%,100%{ opacity:1; }
+  50%{ opacity:.7; }
+}
+
+/* PENDENTE DE VALIDAÇÃO (dourado) */
+.g-card.pendente{
+  border-left: 6px solid #f59e0b;
+  background: #fffbeb;
+  border-top: 1px solid #fcd34d;
+  border-right: 1px solid #fcd34d;
+  border-bottom: 1px solid #fcd34d;
+}
+.g-card.pendente .g-card-bottom{
+  background: #fef9c3;
+  border-top-color: #fcd34d;
+}
+
+/* badge do KPI pendente */
+.badge-pendente{
+  background: #f59e0b;
+  color: #fff;
+}
+
+/* FINALIZADA (verde) */
+.g-card.done{
+  border-left: 6px solid rgba(25,135,84,.9);
+  background: rgba(25,135,84,.06);
+}
+
+/* PRIORIDADE sempre vence */
 .g-card.prio{
   border-left: 6px solid #6f42c1 !important;
   background: rgba(111,66,193,.08) !important;
   box-shadow: 0 0 0 2px rgba(111,66,193,.25) inset !important;
+}
+
+/* ================== MODAL DE DEVOLUÇÃO ================== */
+.modal-devolucao .modal-header{
+  background: #fffbeb;
+  border-bottom: 1px solid #fcd34d;
+}
+.modal-devolucao .modal-title{
+  color: #92400e;
+  font-weight:700;
+}
+
+/* ================== COMENTÁRIO DE DEVOLUÇÃO ================== */
+.comentario-devolucao{
+  border-left: 4px solid #f59e0b !important;
+  background: #fffbeb !important;
+}
+.comentario-devolucao .badge-devolucao{
+  font-size:.7rem;
+  background:#f59e0b;
+  color:#fff;
+  padding:2px 8px;
+  border-radius:999px;
+  margin-left:6px;
+}
+
+/* ================== BUSCA ================== */
+.g-search-wrap{
+  position:relative;
+}
+.g-search-wrap .g-search-icon{
+  position:absolute;
+  left:10px;
+  top:50%;
+  transform:translateY(-50%);
+  color:#6c757d;
+  pointer-events:none;
+  font-size:.95rem;
+}
+.g-search-wrap input{
+  padding-left:32px;
 }

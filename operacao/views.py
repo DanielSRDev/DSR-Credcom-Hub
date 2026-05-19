@@ -1,3 +1,4 @@
+# operacao/views.py
 from __future__ import annotations
 
 import json
@@ -12,12 +13,12 @@ from django.utils import timezone
 from django.views.decorators.http import require_POST, require_GET
 
 from core.decorators import user_in_groups
-from .forms import TarefaForm, ComentarioForm, AnexoForm
+from .forms import TarefaForm, ComentarioForm, AnexoForm, DevolucaoForm
 from .models import Tarefa, Equipe, Comentario, Anexo, OperacaoPermissaoUsuario
 
 
 # ============================================================
-# RBAC (GRUPOS)
+# RBAC
 # ============================================================
 
 def _in_group(user, group_name: str) -> bool:
@@ -37,61 +38,61 @@ def is_supervisor(user) -> bool:
 
 
 def is_operador(user) -> bool:
-    return _in_group(user, "OPERACAO") and (not is_supervisor(user)) and (not is_coord(user))
+    return _in_group(user, "OPERACAO") and not is_supervisor(user) and not is_coord(user)
 
 
 def membros_da_equipe_do_supervisor(user):
-    """
-    Retorna Users que são membros das equipes onde user é supervisor.
-
-    Alterado: o campo supervisor (ForeignKey) foi convertido para
-    supervisores (ManyToManyField), então o lookup passa de:
-        operacao_equipes__supervisor=user
-    para:
-        operacao_equipes__supervisores=user
-
-    O related_name "operacao_equipes" no campo membros não mudou,
-    então a travessia da relação continua igual — só o campo final muda.
-
-    Com ManyToMany um supervisor pode estar em várias equipes, e esta
-    função já retorna .distinct() para evitar duplicatas no queryset.
-    """
     return User.objects.filter(operacao_equipes__supervisores=user).distinct()
 
 
 def queryset_visivel_para(user):
-    """
-    Coordenação: vê tudo.
-    Supervisor: vê tarefas atribuídas aos membros de TODAS as equipes
-                que ele supervisiona (e ele mesmo).
-    Operador: vê tarefas atribuídas a ele e também as que ele criou.
-    """
     if is_coord(user):
         return Tarefa.objects.all()
-
     if is_supervisor(user):
         membros = membros_da_equipe_do_supervisor(user)
         return Tarefa.objects.filter(
             Q(atribuida_para__in=membros) | Q(atribuida_para=user)
         ).distinct()
-
     return Tarefa.objects.filter(
         Q(atribuida_para=user) | Q(criada_por=user)
     ).distinct()
 
 
 def pode_mexer_tarefa(user, tarefa: Tarefa) -> bool:
-    """
-    Coord: pode tudo.
-    Supervisor: pode tudo APENAS nas tarefas visíveis (equipe dele).
-    Operador: nada (somente ações que você liberar).
-    """
     if is_coord(user):
         return True
     if is_supervisor(user):
         membros = membros_da_equipe_do_supervisor(user)
-        return tarefa.atribuida_para_id == user.id or tarefa.atribuida_para_id in membros.values_list("id", flat=True)
+        return (
+            tarefa.atribuida_para_id == user.id
+            or tarefa.atribuida_para_id in membros.values_list("id", flat=True)
+        )
     return False
+
+
+def pode_validar(user, tarefa: Tarefa) -> bool:
+    """
+    Validar (devolver com pendência ou finalizar):
+    - coordenação: sempre
+    - supervisor: se o chamado estiver na equipe dele
+    - operador: somente se for o criador
+    """
+    if is_coord(user):
+        return True
+    if is_supervisor(user):
+        return pode_mexer_tarefa(user, tarefa)
+    return tarefa.criada_por_id == user.id
+
+
+def operador_pode_criar(user):
+    if is_coord(user) or is_supervisor(user):
+        return True
+    if not is_operador(user):
+        return False
+    permissao = getattr(user, "operacao_permissao", None)
+    if permissao is None:
+        return True
+    return permissao.pode_criar_chamado_supervisor
 
 
 # ============================================================
@@ -110,22 +111,13 @@ def go_back(request, fallback="operacao:quadro"):
     return redirect(fallback)
 
 
-# ============================================================
-# QUADRO
-# ============================================================
-
-@user_in_groups("OPERACAO", "OPERACAO_SUPERVISOR", "OPERACAO_CORDENACAO")
-@login_required
-def quadro(request):
-    qs = queryset_visivel_para(request.user).select_related("criada_por", "atribuida_para", "executor")
-
-    # filtros
+def _aplicar_filtros(qs, request):
+    """Filtros comuns: data, responsável e busca (título ou código)."""
     data_ini = (request.GET.get("data_ini") or "").strip()
     data_fim = (request.GET.get("data_fim") or "").strip()
-    user_id = (request.GET.get("user") or "").strip()
-    final = (request.GET.get("final") or "hoje").strip()  # hoje | 7 | 30 | tudo
+    user_id  = (request.GET.get("user") or "").strip()
+    busca    = (request.GET.get("busca") or "").strip()
 
-    # operador não escolhe "Responsável"
     if is_operador(request.user):
         user_id = ""
 
@@ -140,31 +132,45 @@ def quadro(request):
     if data_fim:
         qs = qs.filter(prazo__date__lte=data_fim)
 
+    if busca:
+        qs = qs.filter(Q(codigo__iexact=busca) | Q(titulo__icontains=busca))
+
+    return qs, data_ini, data_fim, user_id, busca
+
+
+# ============================================================
+# QUADRO
+# ============================================================
+
+@user_in_groups("OPERACAO", "OPERACAO_SUPERVISOR", "OPERACAO_CORDENACAO")
+@login_required
+def quadro(request):
+    qs = queryset_visivel_para(request.user).select_related("criada_por", "atribuida_para", "executor")
+    final = (request.GET.get("final") or "hoje").strip()
+
+    qs, data_ini, data_fim, user_id, busca = _aplicar_filtros(qs, request)
+
     qs = qs.annotate(
         anexos_count=Count("anexos", distinct=True),
         comentarios_count=Count("comentarios", distinct=True),
     )
 
-    abertas = qs.filter(status="aberta").order_by("-prioridade", "ordem", "prazo", "-criada_em")
+    abertas    = qs.filter(status="aberta").order_by("-prioridade", "ordem", "prazo", "-criada_em")
     executando = qs.filter(status="executando").order_by("-prioridade", "prazo", "-iniciado_em")
-    executado = qs.filter(status="executado").order_by("-prioridade", "-executado_em", "prazo")
+    executado  = qs.filter(status="executado").order_by("-prioridade", "-executado_em", "prazo")
 
-    # FINALIZADAS
+    # PENDENTE: aparece dourado na tela de quem criou o chamado
+    pendentes = qs.filter(status="pendente").order_by("-pendente_em", "-criada_em")
+
     finalizadas_qs = qs.filter(status="feita")
     agora = timezone.now()
     if final == "hoje":
         ini = _inicio_hoje()
-        fim = ini + timedelta(days=1)
-        finalizadas_qs = finalizadas_qs.filter(finalizado_em__gte=ini, finalizado_em__lt=fim)
+        finalizadas_qs = finalizadas_qs.filter(finalizado_em__gte=ini, finalizado_em__lt=ini + timedelta(days=1))
     elif final in ("7", "30"):
-        dias = int(final)
-        finalizadas_qs = finalizadas_qs.filter(finalizado_em__gte=agora - timedelta(days=dias))
-    elif final == "tudo":
-        pass
-
+        finalizadas_qs = finalizadas_qs.filter(finalizado_em__gte=agora - timedelta(days=int(final)))
     finalizadas = finalizadas_qs.order_by("-finalizado_em", "-criada_em")
 
-    # usuários do filtro conforme cargo
     if is_coord(request.user):
         usuarios = User.objects.filter(is_active=True).order_by("username")
     elif is_supervisor(request.user):
@@ -176,22 +182,25 @@ def quadro(request):
         usuarios = User.objects.filter(id=request.user.id)
 
     context = {
-        "abertas": abertas,
+        "abertas":    abertas,
         "executando": executando,
-        "executado": executado,
+        "executado":  executado,
+        "pendentes":  pendentes,         # NOVO
         "finalizadas": finalizadas,
-        "usuarios": usuarios,
+        "usuarios":   usuarios,
         "f_data_ini": data_ini,
         "f_data_fim": data_fim,
-        "f_user": user_id,
-        "final": final,
-        "pode_criar": operador_pode_criar(request.user),
-        "pode_editar": is_coord(request.user) or is_supervisor(request.user),
-        "pode_deletar": is_coord(request.user) or is_supervisor(request.user),
+        "f_user":     user_id,
+        "f_busca":    busca,             # NOVO
+        "final":      final,
+        "pode_criar":    operador_pode_criar(request.user),
+        "pode_editar":   is_coord(request.user) or is_supervisor(request.user),
+        "pode_deletar":  is_coord(request.user) or is_supervisor(request.user),
         "pode_prioridade": is_coord(request.user) or is_supervisor(request.user),
-        "is_operador": is_operador(request.user),
+        "is_operador":   is_operador(request.user),
         "is_supervisor": is_supervisor(request.user),
-        "is_coord": is_coord(request.user),
+        "is_coord":      is_coord(request.user),
+        "devolucao_form": DevolucaoForm(),   # NOVO
     }
     return render(request, "operacao/operacao.html", context)
 
@@ -205,20 +214,17 @@ def quadro(request):
 def tarefa_criar(request):
     if not operador_pode_criar(request.user):
         return HttpResponseForbidden("Sem permissão para criar.")
-
     if request.method == "POST":
         form = TarefaForm(request.POST, user=request.user)
         if form.is_valid():
             tarefa = form.save(commit=False)
             tarefa.criada_por = request.user
-
             max_ordem = Tarefa.objects.filter(status="aberta").aggregate(m=Max("ordem"))["m"] or 0
             tarefa.ordem = max_ordem + 1
             tarefa.save()
             return go_back(request)
     else:
         form = TarefaForm(user=request.user)
-
     return render(request, "operacao/tarefa_form.html", {"form": form, "titulo": "Novo chamado"})
 
 
@@ -227,10 +233,8 @@ def tarefa_criar(request):
 def tarefa_editar(request, tarefa_id: int):
     qs = Tarefa.objects.all() if is_coord(request.user) else queryset_visivel_para(request.user)
     tarefa = get_object_or_404(qs, id=tarefa_id)
-
     if not pode_mexer_tarefa(request.user, tarefa):
         return HttpResponseForbidden("Sem permissão para editar este chamado.")
-
     if request.method == "POST":
         form = TarefaForm(request.POST, instance=tarefa, user=request.user)
         if form.is_valid():
@@ -238,7 +242,6 @@ def tarefa_editar(request, tarefa_id: int):
             return go_back(request)
     else:
         form = TarefaForm(instance=tarefa, user=request.user)
-
     return render(request, "operacao/tarefa_form.html", {"form": form, "titulo": "Editar chamado"})
 
 
@@ -247,19 +250,16 @@ def tarefa_editar(request, tarefa_id: int):
 def tarefa_deletar(request, tarefa_id: int):
     qs = Tarefa.objects.all() if is_coord(request.user) else queryset_visivel_para(request.user)
     tarefa = get_object_or_404(qs, id=tarefa_id)
-
     if not pode_mexer_tarefa(request.user, tarefa):
         return HttpResponseForbidden("Sem permissão para deletar este chamado.")
-
     if request.method == "POST":
         tarefa.soft_delete(request.user)
         return go_back(request)
-
     return render(request, "operacao/tarefa_delete.html", {"tarefa": tarefa})
 
 
 # ============================================================
-# AÇÕES (PRIORIDADE / STATUS)
+# STATUS
 # ============================================================
 
 @user_in_groups("OPERACAO_SUPERVISOR", "OPERACAO_CORDENACAO")
@@ -268,10 +268,8 @@ def tarefa_deletar(request, tarefa_id: int):
 def toggle_prioridade(request, tarefa_id: int):
     qs = Tarefa.objects.all() if is_coord(request.user) else queryset_visivel_para(request.user)
     tarefa = get_object_or_404(qs, id=tarefa_id)
-
     if not pode_mexer_tarefa(request.user, tarefa):
         return HttpResponseForbidden("Sem permissão.")
-
     tarefa.prioridade = not bool(tarefa.prioridade)
     tarefa.save(update_fields=["prioridade"])
     return go_back(request)
@@ -282,15 +280,14 @@ def toggle_prioridade(request, tarefa_id: int):
 @require_POST
 def marcar_executando(request, tarefa_id: int):
     tarefa = get_object_or_404(queryset_visivel_para(request.user), id=tarefa_id)
-
     if not (request.user.id == tarefa.atribuida_para_id or is_supervisor(request.user) or is_coord(request.user)):
         return HttpResponseForbidden("Você não pode iniciar esse chamado.")
-
-    tarefa.status = "executando"
-    tarefa.executor = request.user
+    tarefa.status      = "executando"
+    tarefa.executor    = request.user
+    tarefa.pendente_em = None
     if not tarefa.iniciado_em:
         tarefa.iniciado_em = timezone.now()
-    tarefa.save(update_fields=["status", "executor", "iniciado_em"])
+    tarefa.save(update_fields=["status", "executor", "iniciado_em", "pendente_em"])
     return go_back(request)
 
 
@@ -299,13 +296,75 @@ def marcar_executando(request, tarefa_id: int):
 @require_POST
 def marcar_executado(request, tarefa_id: int):
     tarefa = get_object_or_404(queryset_visivel_para(request.user), id=tarefa_id)
-
     if not (request.user.id == tarefa.executor_id or is_supervisor(request.user) or is_coord(request.user)):
         return HttpResponseForbidden("Você não pode marcar como executado.")
-
-    tarefa.status = "executado"
+    tarefa.status       = "executado"
     tarefa.executado_em = timezone.now()
-    tarefa.save(update_fields=["status", "executado_em"])
+    tarefa.pendente_em  = None
+    tarefa.save(update_fields=["status", "executado_em", "pendente_em"])
+    return go_back(request)
+
+
+@user_in_groups("OPERACAO", "OPERACAO_SUPERVISOR", "OPERACAO_CORDENACAO")
+@login_required
+@require_POST
+def devolver_pendencia(request, tarefa_id: int):
+    """
+    Criador (ou supervisor/coord) devolve chamado EXECUTADO com pendência.
+    Obriga comentário, move para PENDENTE (dourado).
+    """
+    tarefa = get_object_or_404(queryset_visivel_para(request.user), id=tarefa_id)
+
+    if not pode_validar(request.user, tarefa):
+        return HttpResponseForbidden("Sem permissão para devolver este chamado.")
+
+    if tarefa.status not in ("executado", "pendente"):
+        return HttpResponseForbidden("Chamado não está em estado que permite devolução.")
+
+    form = DevolucaoForm(request.POST)
+    if not form.is_valid():
+        return go_back(request)
+
+    Comentario.objects.create(
+        tarefa=tarefa,
+        autor=request.user,
+        texto=form.cleaned_data["motivo"],
+        eh_devolucao=True,
+    )
+
+    tarefa.marcar_pendente()
+    tarefa.save(update_fields=["status", "pendente_em", "finalizado_em"])
+    return go_back(request)
+
+
+@user_in_groups("OPERACAO", "OPERACAO_SUPERVISOR", "OPERACAO_CORDENACAO")
+@login_required
+@require_POST
+def confirmar_devolucao(request, tarefa_id: int):
+    """
+    Executor refez o trabalho e marca como executado novamente.
+    Card sai de PENDENTE e volta para EXECUTADO — aparece na coluna
+    de validação do criador outra vez.
+    Quem age aqui é o EXECUTOR, não o criador.
+    """
+    tarefa = get_object_or_404(queryset_visivel_para(request.user), id=tarefa_id)
+
+    pode = (
+        request.user.id == tarefa.executor_id
+        or request.user.id == tarefa.atribuida_para_id
+        or is_supervisor(request.user)
+        or is_coord(request.user)
+    )
+    if not pode:
+        return HttpResponseForbidden("Sem permissão.")
+
+    if tarefa.status != "pendente":
+        return HttpResponseForbidden("Chamado não está pendente.")
+
+    tarefa.status       = "executado"
+    tarefa.executado_em = timezone.now()
+    tarefa.pendente_em  = None
+    tarefa.save(update_fields=["status", "executado_em", "pendente_em"])
     return go_back(request)
 
 
@@ -314,19 +373,16 @@ def marcar_executado(request, tarefa_id: int):
 @require_POST
 def finalizar_reabrir(request, tarefa_id: int):
     tarefa = get_object_or_404(queryset_visivel_para(request.user), id=tarefa_id)
-
     if not (request.user.id == tarefa.criada_por_id or is_coord(request.user)):
         return HttpResponseForbidden("Somente o criador ou coordenação pode finalizar/reabrir.")
-
     if tarefa.status == "feita":
-        tarefa.status = "aberta"
+        tarefa.status        = "aberta"
         tarefa.finalizado_em = None
         tarefa.save(update_fields=["status", "finalizado_em"])
     else:
-        tarefa.status = "feita"
+        tarefa.status        = "feita"
         tarefa.finalizado_em = timezone.now()
         tarefa.save(update_fields=["status", "finalizado_em"])
-
     return go_back(request)
 
 
@@ -337,25 +393,25 @@ def finalizar_reabrir(request, tarefa_id: int):
 @user_in_groups("OPERACAO", "OPERACAO_SUPERVISOR", "OPERACAO_CORDENACAO")
 @login_required
 def detalhe(request, tarefa_id: int):
-    tarefa = get_object_or_404(queryset_visivel_para(request.user).select_related("criada_por", "atribuida_para", "executor"), id=tarefa_id)
-
-    comentarios = Comentario.objects.filter(tarefa=tarefa).select_related("autor").order_by("-criado_em")
-    anexos = Anexo.objects.filter(tarefa=tarefa).select_related("enviado_por").order_by("-enviado_em")
-
-    pode_editar = is_coord(request.user) or is_supervisor(request.user)
-    return render(
-        request,
-        "operacao/tarefa_detalhe.html",
-        {
-            "tarefa": tarefa,
-            "comentarios": comentarios,
-            "anexos": anexos,
-            "comentario_form": ComentarioForm(),
-            "anexo_form": AnexoForm(),
-            "pode_editar": pode_editar,
-            "pode_prioridade": pode_editar,
-        },
+    tarefa = get_object_or_404(
+        queryset_visivel_para(request.user).select_related("criada_por", "atribuida_para", "executor"),
+        id=tarefa_id,
     )
+    comentarios = Comentario.objects.filter(tarefa=tarefa).select_related("autor").order_by("-criado_em")
+    anexos      = Anexo.objects.filter(tarefa=tarefa).select_related("enviado_por").order_by("-enviado_em")
+    pode_editar_flag = is_coord(request.user) or is_supervisor(request.user)
+
+    return render(request, "operacao/tarefa_detalhe.html", {
+        "tarefa":         tarefa,
+        "comentarios":    comentarios,
+        "anexos":         anexos,
+        "comentario_form": ComentarioForm(),
+        "anexo_form":      AnexoForm(),
+        "devolucao_form":  DevolucaoForm(),
+        "pode_editar":     pode_editar_flag,
+        "pode_prioridade": pode_editar_flag,
+        "pode_validar":    pode_validar(request.user, tarefa),
+    })
 
 
 @user_in_groups("OPERACAO", "OPERACAO_SUPERVISOR", "OPERACAO_CORDENACAO")
@@ -363,14 +419,12 @@ def detalhe(request, tarefa_id: int):
 @require_POST
 def comentario_criar(request, tarefa_id: int):
     tarefa = get_object_or_404(queryset_visivel_para(request.user), id=tarefa_id)
-
     form = ComentarioForm(request.POST)
     if form.is_valid():
         c = form.save(commit=False)
         c.tarefa = tarefa
-        c.autor = request.user
+        c.autor  = request.user
         c.save()
-
     return go_back(request, fallback="operacao:detalhe")
 
 
@@ -379,7 +433,9 @@ def comentario_criar(request, tarefa_id: int):
 def anexos(request, tarefa_id: int):
     tarefa = get_object_or_404(queryset_visivel_para(request.user), id=tarefa_id)
     anexos_qs = Anexo.objects.filter(tarefa=tarefa).select_related("enviado_por").order_by("-enviado_em")
-    return render(request, "operacao/tarefa_anexos.html", {"tarefa": tarefa, "anexos": anexos_qs, "anexo_form": AnexoForm()})
+    return render(request, "operacao/tarefa_anexos.html", {
+        "tarefa": tarefa, "anexos": anexos_qs, "anexo_form": AnexoForm(),
+    })
 
 
 @user_in_groups("OPERACAO", "OPERACAO_SUPERVISOR", "OPERACAO_CORDENACAO")
@@ -387,16 +443,14 @@ def anexos(request, tarefa_id: int):
 @require_POST
 def anexo_upload(request, tarefa_id: int):
     tarefa = get_object_or_404(queryset_visivel_para(request.user), id=tarefa_id)
-
     form = AnexoForm(request.POST, request.FILES)
     if form.is_valid():
         a = form.save(commit=False)
-        a.tarefa = tarefa
+        a.tarefa      = tarefa
         a.enviado_por = request.user
         if not a.nome_original and a.arquivo:
             a.nome_original = a.arquivo.name
         a.save()
-
     return go_back(request, fallback="operacao:anexos")
 
 
@@ -404,17 +458,14 @@ def anexo_upload(request, tarefa_id: int):
 @login_required
 def anexo_download(request, anexo_id: int):
     a = get_object_or_404(Anexo.objects.select_related("tarefa"), id=anexo_id)
-
     get_object_or_404(queryset_visivel_para(request.user), id=a.tarefa_id)
-
     if not a.arquivo:
         raise Http404("Arquivo não encontrado.")
-
     return FileResponse(a.arquivo.open("rb"), as_attachment=False, filename=a.nome_original or "anexo")
 
 
 # ============================================================
-# REORDENAR (somente ABERTAS) - gestor
+# REORDENAR — usa bulk_update (alinhado com Gestao)
 # ============================================================
 
 @user_in_groups("OPERACAO_SUPERVISOR", "OPERACAO_CORDENACAO")
@@ -432,77 +483,44 @@ def reordenar(request):
     qs = Tarefa.objects.all() if is_coord(request.user) else queryset_visivel_para(request.user)
     tarefas = {t.id: t for t in qs.filter(status="aberta", id__in=ids)}
 
-    ordem = 0
+    ordem = 1
     for raw_id in ids:
         try:
             tid = int(raw_id)
         except Exception:
             continue
         t = tarefas.get(tid)
-        if not t:
-            continue
-        ordem += 1
-        if t.ordem != ordem:
+        if t:
             t.ordem = ordem
-            t.save(update_fields=["ordem"])
+            ordem += 1
 
+    # bulk_update — única query (corrigido vs versão anterior)
+    Tarefa.objects.bulk_update(tarefas.values(), ["ordem"])
     return JsonResponse({"ok": True})
 
 
 # ============================================================
-# KPIs AO VIVO (CARDS DO TOPO)
+# KPIs AO VIVO
 # ============================================================
 
 @login_required
 @require_GET
 def partial_kpis(request):
-    qs = queryset_visivel_para(request.user)
-
-    abertas = qs.filter(status="aberta").count()
-    executando = qs.filter(status="executando").count()
-    executado = qs.filter(status="executado").count()
-    finalizadas = qs.filter(status="feita").count()
-
+    qs    = queryset_visivel_para(request.user)
     agora = timezone.now()
-    status_pendentes = [Tarefa.Status.ABERTA, Tarefa.Status.EXECUTANDO]
-
-    atrasadas = qs.filter(
-        status__in=status_pendentes,
-        prazo__lt=agora
-    ).count()
-
-    vencendo = qs.filter(
-        status__in=status_pendentes,
-        prazo__gte=agora,
-        prazo__lte=agora + timedelta(hours=24)
-    ).count()
+    status_pendentes = [Tarefa.Status.ABERTA, Tarefa.Status.EXECUTANDO, Tarefa.Status.PENDENTE]
 
     return render(request, "operacao/partials/kpis.html", {
-        "abertas": abertas,
-        "executando": executando,
-        "executado": executado,
-        "finalizadas": finalizadas,
-        "atrasadas": atrasadas,
-        "vencendo": vencendo,
-        "now": timezone.now(),
+        "abertas":     qs.filter(status="aberta").count(),
+        "executando":  qs.filter(status="executando").count(),
+        "executado":   qs.filter(status="executado").count(),
+        "pendentes":   qs.filter(status="pendente").count(),     # NOVO
+        "finalizadas": qs.filter(status="feita").count(),
+        "atrasadas":   qs.filter(status__in=status_pendentes, prazo__lt=agora).count(),
+        "vencendo":    qs.filter(
+            status__in=status_pendentes,
+            prazo__gte=agora,
+            prazo__lte=agora + timedelta(hours=24),
+        ).count(),
+        "now": agora,
     })
-
-
-def operador_pode_criar(user):
-    """
-    Regra:
-    - coordenação: sim
-    - supervisor: sim
-    - operador: sim por padrão, exceto se houver bloqueio individual
-    """
-    if is_coord(user) or is_supervisor(user):
-        return True
-
-    if not is_operador(user):
-        return False
-
-    permissao = getattr(user, "operacao_permissao", None)
-    if permissao is None:
-        return True
-
-    return permissao.pode_criar_chamado_supervisor

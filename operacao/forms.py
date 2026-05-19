@@ -220,3 +220,23 @@ class AnexoForm(forms.ModelForm):
                 }
             ),
         }
+
+class DevolucaoForm(forms.Form):
+    """
+    Formulário de devolução com pendência.
+    Aparece quando o criador rejeita um chamado EXECUTADO.
+    O campo 'motivo' é obrigatório e vira um Comentario com eh_devolucao=True.
+    """
+    motivo = forms.CharField(
+        label="O que precisa ser corrigido?",
+        min_length=10,
+        widget=forms.Textarea(attrs={
+            "class": "form-control",
+            "rows": 3,
+            "placeholder": "Descreva o que está faltando ou precisa ser refeito...",
+        }),
+        error_messages={
+            "required":   "É obrigatório informar o motivo da devolução.",
+            "min_length": "Descreva o motivo com pelo menos 10 caracteres.",
+        },
+    )
