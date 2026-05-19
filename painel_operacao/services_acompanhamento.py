@@ -64,10 +64,22 @@ def linked_credores_ids():
 
 
 def qs_relatorio_vinculado():
-    ids = linked_credores_ids()
-    qs = PainelOperacaoRelatorioGeral.objects.filter(cre_id__in=ids)
-    qs = qs.exclude(emitido_por_nome__isnull=True).exclude(emitido_por_nome__exact="")
-    return qs
+    """
+    Retorna todos os registros de PainelOperacaoRelatorioGeral sem filtros
+    de credor ou operador.
+
+    Motivo da mudança:
+    - O filtro anterior cre_id__in=linked_credores_ids() descartava
+      silenciosamente registros de credores ainda não cadastrados em
+      CarteiraSupervisor, causando divergência entre o dashboard e o Excel.
+    - O exclude(emitido_por_nome="") descartava registros onde o operador
+      não foi resolvido via alias — esses aparecem normalmente no Excel.
+
+    Filtros de credor/supervisor são aplicados em aplicar_filtros_relatorio
+    apenas quando o usuário seleciona explicitamente. O dashboard sem filtro
+    deve mostrar o mesmo total que o Excel exportado.
+    """
+    return PainelOperacaoRelatorioGeral.objects.all()
 
 
 def aplicar_filtros_relatorio(data_ini=None, data_fim=None, supervisor=None, operador=None, credor=None):
@@ -202,13 +214,15 @@ def montar_acompanhamento_geral(data_ini=None, data_fim=None, supervisor=None, o
         total_quebra += decimal_or_zero(registro.valor_quebra)
 
         nome_operador = (registro.emitido_por_nome or "").strip()
-        if not nome_operador:
-            continue
-
         login_operador = (registro.emitido_por_login or "").strip()
         nome_supervisor = (registro.supervisor_nome or "").strip() or "SEM SUPERVISOR"
         cre_id = registro.cre_id
         credor_nome = registro.credor or "SEM CARTEIRA"
+
+        # Registros sem operador entram nos totais gerais mas não são
+        # agrupados por operador/carteira (não existem na lista de metas).
+        if not nome_operador:
+            continue
 
         chave_operador = (nome_operador, login_operador, nome_supervisor)
         operadores.setdefault(chave_operador, {

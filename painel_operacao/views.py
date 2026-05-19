@@ -605,8 +605,9 @@ def atualizar_relatorio_geral_view(request):
     credor = request.POST.get("credor") or ""
 
     try:
-        data_ini = date.fromisoformat(data_ini_str) if data_ini_str else date.today()
-        data_fim = date.fromisoformat(data_fim_str) if data_fim_str else date.today()
+        hoje = date.today()
+        data_ini = date.fromisoformat(data_ini_str) if data_ini_str else date(hoje.year, hoje.month, 1)
+        data_fim = date.fromisoformat(data_fim_str) if data_fim_str else hoje
 
         resultado = sincronizar_relatorio_geral(
             data_ini=data_ini,
@@ -734,7 +735,7 @@ def exportar_relatorio_geral_view(request):
             if valor_pago > 0:
                 return "PAGO"
             if valor_avencer > 0:
-                return "AVENCER"
+                return "A Vencer"
             return "QUEBRA"
 
         df["status_real"] = df.apply(calcular_status_real, axis=1)
@@ -1080,7 +1081,7 @@ def exportar_acompanhamento_geral_view(request):
 
     registros_detalhados = []
     for item in dados["queryset"]:
-        status_real = "PAGO" if zero_decimal(item.valor_pago) > 0 else "AVENCER" if zero_decimal(item.valor_avencer) > 0 else "QUEBRA"
+        status_real = "PAGO" if zero_decimal(item.valor_pago) > 0 else "A Vencer" if zero_decimal(item.valor_avencer) > 0 else "QUEBRA"
         registros_detalhados.append({
             "Origem": item.origem_registro,
             "Status Real": status_real,

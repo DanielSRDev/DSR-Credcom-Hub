@@ -469,7 +469,31 @@ def criar_registros_relatorio_a_partir_painel(itens_painel):
     """
     Cria a parte HUB do Relatório Geral usando exatamente os itens já consolidados do HUB.
     Isso elimina divergência entre painel e relatório para AVENCER/QUEBRA.
+
+    Para registros PAGO, popula data_pagamento a partir de PainelOperacaoPagamento
+    (tabela local já sincronizada), usando o pagamento mais recente vinculado ao aco_id.
+    Isso cobre casos em que o acordo está pago via status (PAGO_SEM_BAIXA_REAL) ou
+    via evento de pagamento registrado fora do tb_pagamento — onde data_pagamento viria
+    nula se dependêssemos só do SQL_PAGAMENTOS_ACORDO.
     """
+    # Monta índice aco_id -> data mais recente de pagamento a partir da tabela local
+    aco_ids_pago = {
+        item.aco_id
+        for item in itens_painel
+        if classificar_item_painel_para_relatorio(item) == "PAGO" and item.aco_id is not None
+    }
+
+    mapa_data_pagamento = {}
+    if aco_ids_pago:
+        for pag in (
+            PainelOperacaoPagamento.objects
+            .filter(aco_id__in=aco_ids_pago)
+            .order_by("aco_id", "-pgo_data", "-pgo_id")
+        ):
+            # Mantém apenas o mais recente por aco_id (primeiro da ordem DESC)
+            if pag.aco_id not in mapa_data_pagamento:
+                mapa_data_pagamento[pag.aco_id] = pag.pgo_data
+
     registros = []
 
     for item in itens_painel:
@@ -486,13 +510,18 @@ def criar_registros_relatorio_a_partir_painel(itens_painel):
             honorario_liquido=honorario_liquido,
         )
 
+        # Popula data_pagamento: busca no mapa local (evento real de pagamento).
+        # Fallback para None se não houver registro em PainelOperacaoPagamento
+        # (cobre PAGO_SEM_BAIXA_REAL onde não existe tb_pagamento correspondente).
+        data_pagamento_hub = mapa_data_pagamento.get(item.aco_id)
+
         registros.append(
             PainelOperacaoRelatorioGeral(
                 origem_registro="HUB",
                 data_referencia=item.data_referencia,
                 data_acordo=item.data_acordo,
                 data_emissao=item.data_emissao,
-                data_pagamento=None,
+                data_pagamento=data_pagamento_hub,
                 data_etl_alteracao=item.data_etl_alteracao,
 
                 numero_acordo=item.numero_acordo or "",
