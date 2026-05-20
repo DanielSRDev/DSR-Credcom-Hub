@@ -122,7 +122,12 @@ def _annotate_counts(qs):
 def _build_base_filtrado(request):
     """
     Aplica filtros de data, responsável e busca (título ou código).
-    Usuário comum fica travado nas próprias tarefas.
+
+    Mesma regra do `quadro` para manter KPIs e contadores consistentes:
+      - Usuário sem permissão de gestor fica travado em si mesmo.
+      - Com f_user: tudo que tem QUALQUER relação com esse usuário
+        (atribuído, executor ou criador).
+      - Sem f_user: tudo que tem relação com o LOGADO.
     """
     f_data_ini = request.GET.get("data_ini") or ""
     f_data_fim = request.GET.get("data_fim") or ""
@@ -134,26 +139,32 @@ def _build_base_filtrado(request):
     if not pode_editar(request.user):
         f_user = str(request.user.id)
 
-    if f_user:
-        base = base.filter(atribuida_para_id=f_user)
-
     if f_data_ini:
         base = base.filter(prazo__date__gte=f_data_ini)
     if f_data_fim:
         base = base.filter(prazo__date__lte=f_data_fim)
 
-    # Busca por código exato (ex: GES-00003) ou substring no título
     if f_busca:
         base = base.filter(
             Q(codigo__iexact=f_busca) | Q(titulo__icontains=f_busca)
         )
 
-    if not pode_editar(request.user):
+    if f_user:
+        try:
+            uid = int(f_user)
+            base = base.filter(
+                Q(atribuida_para_id=uid)
+                | Q(executor_id=uid)
+                | Q(criada_por_id=uid)
+            ).distinct()
+        except (ValueError, TypeError):
+            pass
+    else:
         base = base.filter(
             Q(atribuida_para=request.user)
-            | Q(criada_por=request.user)
             | Q(executor=request.user)
-        )
+            | Q(criada_por=request.user)
+        ).distinct()
 
     return base
 
@@ -175,12 +186,6 @@ def quadro(request):
 
     base = Tarefa.objects.select_related("criada_por", "atribuida_para", "executor")
 
-    if not pode_editar(request.user):
-        f_user = str(request.user.id)
-
-    if f_user:
-        base = base.filter(atribuida_para_id=f_user)
-
     if f_data_ini:
         base = base.filter(prazo__date__gte=f_data_ini)
     if f_data_fim:
@@ -191,12 +196,37 @@ def quadro(request):
             Q(codigo__iexact=f_busca) | Q(titulo__icontains=f_busca)
         )
 
+    # ------------------------------------------------------------------
+    # Regra de filtro de responsável (vale para TODAS as colunas):
+    #   - Usuário sem permissão de gestor fica travado em si mesmo.
+    #   - COM f_user (gestor filtrando alguém): mostra todos os cards
+    #     em que esse usuário tem QUALQUER relação (atribuído OU
+    #     executor OU criador). Filtro estrito — não mistura cards
+    #     do próprio logado.
+    #   - SEM f_user: mostra tudo que tem relação com o LOGADO
+    #     (atribuído OU executor OU criador).
+    # ------------------------------------------------------------------
     if not pode_editar(request.user):
+        # Não-gestor não pode filtrar outro responsável
+        f_user = str(request.user.id)
+
+    if f_user:
+        try:
+            uid = int(f_user)
+            base = base.filter(
+                Q(atribuida_para_id=uid)
+                | Q(executor_id=uid)
+                | Q(criada_por_id=uid)
+            ).distinct()
+        except (ValueError, TypeError):
+            pass
+    else:
+        # Gestor sem filtro: mostra tudo em que ele tem relação
         base = base.filter(
             Q(atribuida_para=request.user)
-            | Q(criada_por=request.user)
             | Q(executor=request.user)
-        )
+            | Q(criada_por=request.user)
+        ).distinct()
 
     base = _annotate_counts(base)
 

@@ -46,15 +46,25 @@ def membros_da_equipe_do_supervisor(user):
 
 
 def queryset_visivel_para(user):
+    """
+    Cards que o usuário tem direito de ver/agir.
+    Inclui SEMPRE os que ele criou — necessário para que o criador
+    consiga validar (finalizar/devolver) chamados em status EXECUTADO
+    ou PENDENTE, abrir detalhe, comentar e baixar anexos.
+    """
     if is_coord(user):
         return Tarefa.objects.all()
     if is_supervisor(user):
         membros = membros_da_equipe_do_supervisor(user)
         return Tarefa.objects.filter(
-            Q(atribuida_para__in=membros) | Q(atribuida_para=user)
+            Q(atribuida_para__in=membros)
+            | Q(atribuida_para=user)
+            | Q(criada_por=user)
         ).distinct()
     return Tarefa.objects.filter(
-        Q(atribuida_para=user) | Q(criada_por=user)
+        Q(atribuida_para=user)
+        | Q(executor=user)
+        | Q(criada_por=user)
     ).distinct()
 
 
@@ -112,18 +122,35 @@ def go_back(request, fallback="operacao:quadro"):
 
 
 def _aplicar_filtros(qs, request):
-    """Filtros comuns: data, responsável e busca (título ou código)."""
+    """
+    Filtros comuns aplicados ao quadro: data, responsável e busca (título ou código).
+
+    Regra de responsável:
+      - Operador comum NÃO pode filtrar outros usuários: f_user é forçado pro próprio id.
+      - Sem filtro (f_user vazio): NÃO filtra por usuário aqui — quem cuida disso é
+        `queryset_visivel_para`, que já restringe ao escopo do logado (atribuído,
+        executor ou criador).
+      - Com filtro f_user=X: mostra TODOS os cards com qualquer relação com X
+        (atribuído OU executor OU criador). Vale dentro do escopo já permitido
+        pelo `queryset_visivel_para`.
+    """
     data_ini = (request.GET.get("data_ini") or "").strip()
     data_fim = (request.GET.get("data_fim") or "").strip()
     user_id  = (request.GET.get("user") or "").strip()
     busca    = (request.GET.get("busca") or "").strip()
 
+    # Operador puro fica travado em si mesmo (não escolhe outro responsável)
     if is_operador(request.user):
-        user_id = ""
+        user_id = str(request.user.id)
 
     if user_id:
         try:
-            qs = qs.filter(atribuida_para_id=int(user_id))
+            uid = int(user_id)
+            qs = qs.filter(
+                Q(atribuida_para_id=uid)
+                | Q(executor_id=uid)
+                | Q(criada_por_id=uid)
+            ).distinct()
         except ValueError:
             pass
 
