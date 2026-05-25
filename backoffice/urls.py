@@ -5,10 +5,12 @@ from django.conf.urls.static import static
 from django.conf import settings
 
 from backoffice import views  # sua view ambiente
+from core import views as core_views
 
 urlpatterns = [
     path("", RedirectView.as_view(pattern_name="login", permanent=False)),
     path("admin/", admin.site.urls),
+    path("accounts/primeiro-acesso/", core_views.primeiro_acesso, name="primeiro_acesso"),
     path("accounts/", include("django.contrib.auth.urls")),
     path("ambiente/", views.ambiente, name="ambiente"),
     path("nibo/", include("nibo_panel.urls")),

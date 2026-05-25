@@ -1,5 +1,43 @@
 from django.conf import settings
 from django.db import models
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+
+
+class PerfilUsuario(models.Model):
+    """
+    Perfil estendido do usuário.
+
+    deve_trocar_senha = True  → usuário será redirecionado para criar
+                                nova senha assim que fizer login.
+    Admin pode marcar novamente para forçar troca (ex.: reset de senha).
+    """
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="perfil",
+        verbose_name="Usuário",
+    )
+    deve_trocar_senha = models.BooleanField(
+        default=True,
+        verbose_name="Deve trocar senha no próximo acesso",
+        help_text="Marque para forçar o usuário a criar nova senha no próximo login.",
+    )
+
+    class Meta:
+        verbose_name = "Perfil de usuário"
+        verbose_name_plural = "Perfis de usuários"
+
+    def __str__(self):
+        return f"Perfil de {self.user.username}"
+
+
+@receiver(post_save, sender=settings.AUTH_USER_MODEL)
+def criar_perfil_usuario(sender, instance, created, **kwargs):
+    """Cria o perfil automaticamente quando um novo usuário é criado."""
+    if created:
+        PerfilUsuario.objects.get_or_create(user=instance)
 
 
 class UsuarioRestricaoModulo(models.Model):

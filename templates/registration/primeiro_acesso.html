@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Criar nova senha • Credcom Hub{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center justify-content-center" style="min-height: calc(100vh - 56px - 48px);">
+  <div class="card shadow-sm" style="width: 100%; max-width: 440px; border-radius: 16px;">
+    <div class="card-body p-4">
+
+      <div class="text-center mb-4">
+        <div class="badge bg-warning-subtle text-warning fw-bold rounded-pill px-3 py-2"
+             style="border:1px solid rgba(255,193,7,.35); font-size:.85rem;">
+          Primeiro Acesso
+        </div>
+        <h5 class="mt-3 mb-1">Crie sua senha</h5>
+        <small class="text-secondary">
+          Por segurança, defina uma senha pessoal antes de continuar.
+        </small>
+      </div>
+
+      {% if erro %}
+        <div class="alert alert-danger py-2 small">{{ erro }}</div>
+      {% endif %}
+
+      <form method="post" novalidate>
+        {% csrf_token %}
+
+        <div class="mb-3">
+          <label for="id_nova" class="form-label fw-semibold">Nova senha</label>
+          <input type="password" id="id_nova" name="nova_senha"
+                 class="form-control form-control-lg"
+                 autocomplete="new-password"
+                 placeholder="Mínimo 6 caracteres"
+                 required>
+        </div>
+
+        <div class="mb-4">
+          <label for="id_confirma" class="form-label fw-semibold">Confirmar senha</label>
+          <input type="password" id="id_confirma" name="confirmar_senha"
+                 class="form-control form-control-lg"
+                 autocomplete="new-password"
+                 placeholder="Repita a nova senha"
+                 required>
+        </div>
+
+        <button type="submit" class="btn btn-primary btn-lg w-100">
+          Salvar e entrar
+        </button>
+      </form>
+
+      <p class="text-center text-secondary small mt-4 mb-0">
+        Dúvidas? Fale com o administrador do sistema.
+      </p>
+
+    </div>
+  </div>
+</div>
+{% endblock %}

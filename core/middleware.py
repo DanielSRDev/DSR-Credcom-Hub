@@ -1,5 +1,16 @@
 from django.http import HttpResponseForbidden
 from django.contrib.auth.views import redirect_to_login
+from django.shortcuts import redirect
+
+PRIMEIRO_ACESSO_URL = "/accounts/primeiro-acesso/"
+
+# Rotas liberadas mesmo quando deve_trocar_senha = True
+_LIBERADAS_PRIMEIRO_ACESSO = {
+    PRIMEIRO_ACESSO_URL,
+    "/accounts/logout/",
+    "/accounts/login/",
+    "/admin/",
+}
 
 
 class ModuleGroupAccessMiddleware:
@@ -87,6 +98,19 @@ class ModuleGroupAccessMiddleware:
         # rotas públicas — sem nenhuma verificação
         if path in self.PUBLIC_PATHS:
             return self.get_response(request)
+
+        # --- primeiro acesso: força troca de senha ---
+        user = request.user
+        if (
+            user.is_authenticated
+            and not user.is_superuser
+            and not any(path.startswith(p) for p in _LIBERADAS_PRIMEIRO_ACESSO)
+        ):
+            try:
+                if user.perfil.deve_trocar_senha:
+                    return redirect(PRIMEIRO_ACESSO_URL)
+            except Exception:
+                pass  # perfil ainda não criado → deixa passar normalmente
 
         for prefix, allowed_groups in self.RULES.items():
             if not path.startswith(prefix):
