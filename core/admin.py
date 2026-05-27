@@ -1,9 +1,8 @@
 import logging
 
-from django.contrib import admin, messages
+from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.contrib.auth.models import User
-from django.template.response import SimpleTemplateResponse
 from django.utils.html import format_html
 
 from .models import PerfilUsuario, UsuarioRestricaoModulo
@@ -79,34 +78,9 @@ class CustomUserAdmin(BaseUserAdmin):
             f"{total} usuário(s) desmarcado(s) — não precisarão trocar senha.",
         )
 
-    # --- Intercepta a tela "Alterar senha" do admin --------------------------
-    # SimpleTemplateResponse = formulário com erros (não salvou)
-    # Qualquer outra resposta num POST = senha salva com sucesso
-
-    def change_password_view(self, request, id, form_url=""):
-        response = super().change_password_view(request, id, form_url)
-
-        senha_salva = (
-            request.method == "POST"
-            and not isinstance(response, SimpleTemplateResponse)
-        )
-
-        if senha_salva:
-            marcar = request.POST.get("marcar_primeiro_acesso") == "on"
-            try:
-                user_obj = User.objects.get(pk=id)
-                perfil, _ = PerfilUsuario.objects.get_or_create(user=user_obj)
-                perfil.deve_trocar_senha = marcar
-                perfil.save(update_fields=["deve_trocar_senha"])
-                if marcar:
-                    messages.info(
-                        request,
-                        f"✔ {user_obj.username} precisará criar nova senha no próximo login.",
-                    )
-            except Exception:
-                logger.exception("Erro ao atualizar deve_trocar_senha para user pk=%s", id)
-
-        return response
+    # Nota: o flag deve_trocar_senha é setado automaticamente pelo signal
+    # pre_save em core/models.py sempre que a senha do usuário muda.
+    # O admin pode usar a ação "Marcar para trocar senha" para forçar manualmente.
 
 
 admin.site.unregister(User)

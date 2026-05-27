@@ -5,7 +5,7 @@ from django.utils import timezone
 from django.contrib.auth import get_user_model
 from django.db.models import Q, Count
 
-from .models import Conversation, Message, ChatVinculoOperador, ChatPresence, ChatBloqueio, ChatLiberacao
+from .models import Conversation, Message, MessageReaction, ChatVinculoOperador, ChatPresence, ChatBloqueio, ChatLiberacao
 
 User = get_user_model()
 
@@ -177,7 +177,7 @@ def _get_or_create_conversation(u1, u2):
 
 def list_messages_between(me, other):
     conv = _get_or_create_conversation(me, other)
-    msgs = conv.messages.select_related("sender").all()
+    msgs = conv.messages.select_related("sender", "reply_to__sender").prefetch_related("reactions").all()
     return msgs, conv
 
 
@@ -213,12 +213,33 @@ def mark_read_conversation(me, other) -> int:
 # ENVIO
 # ==========
 
-def send_text(me, other, texto: str, imagem=None):
+def send_text(me, other, texto: str, imagem=None, reply_to_id=None):
     conv = _get_or_create_conversation(me, other)
+    reply_to = None
+    if reply_to_id:
+        try:
+            reply_to = Message.objects.get(id=int(reply_to_id), conversation=conv)
+        except (Message.DoesNotExist, ValueError):
+            pass
     msg = Message.objects.create(
         conversation=conv,
         sender=me,
         texto=texto or "",
         imagem=imagem if imagem else None,
+        reply_to=reply_to,
     )
     return msg
+
+
+ALLOWED_REACTION_EMOJIS = {"👍", "❤️", "😂", "😮", "😢", "🙏"}
+
+
+def toggle_reaction(user, message, emoji: str) -> bool:
+    if emoji not in ALLOWED_REACTION_EMOJIS:
+        return False
+    reaction, created = MessageReaction.objects.get_or_create(
+        message=message, user=user, emoji=emoji
+    )
+    if not created:
+        reaction.delete()
+    return created

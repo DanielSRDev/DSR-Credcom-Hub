@@ -28,6 +28,9 @@ class Conversation(models.Model):
 class Message(models.Model):
     conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name="messages")
     sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name="sent_messages")
+    reply_to = models.ForeignKey(
+        "self", on_delete=models.SET_NULL, null=True, blank=True, related_name="replies"
+    )
 
     texto = models.TextField(blank=True, default="")
     imagem = models.ImageField(upload_to="chat_interno/imagens/", null=True, blank=True)
@@ -40,6 +43,22 @@ class Message(models.Model):
 
     def __str__(self):
         return f"Msg {self.id} ({self.sender_id})"
+
+
+class MessageReaction(models.Model):
+    message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name="reactions")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="chat_reactions")
+    emoji = models.CharField(max_length=10)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["message", "user", "emoji"], name="uniq_message_reaction"
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.emoji} por {self.user_id} em msg {self.message_id}"
 
 
 class ChatVinculoOperador(models.Model):

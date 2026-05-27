@@ -103,7 +103,6 @@ class ModuleGroupAccessMiddleware:
         user = request.user
         if (
             user.is_authenticated
-            and not user.is_superuser
             and not any(path.startswith(p) for p in _LIBERADAS_PRIMEIRO_ACESSO)
         ):
             try:

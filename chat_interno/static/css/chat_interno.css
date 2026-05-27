@@ -349,6 +349,190 @@
 .chat-dot-offline { background: #9ca3af; }
 
 /* ============================= */
+/*    REPLY + REACTIONS + HOVER  */
+/* ============================= */
+
+/* Wrapper de cada linha de mensagem */
+.chat-msg-wrap {
+  position: relative;
+}
+
+/* Botões de ação que aparecem no hover da mensagem */
+.chat-msg-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  opacity: 0;
+  transition: opacity 0.15s;
+  padding: 0 5px;
+  flex-shrink: 0;
+  align-self: center;
+}
+
+.chat-msg-wrap:hover .chat-msg-actions {
+  opacity: 1;
+}
+
+.chat-action-btn {
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 50%;
+  width: 30px;
+  height: 30px;
+  cursor: pointer;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 4px rgba(0,0,0,.12);
+  transition: background 0.12s;
+  flex-shrink: 0;
+  padding: 0;
+}
+
+.chat-action-btn:hover {
+  background: #f0f2f5;
+}
+
+/* Bloco de citação dentro do bubble */
+.chat-reply-quote {
+  background: rgba(0,0,0,.07);
+  border-left: 3px solid rgba(0,0,0,.25);
+  border-radius: 6px;
+  padding: 5px 8px;
+  margin-bottom: 6px;
+  cursor: pointer;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.chat-reply-quote:hover {
+  background: rgba(0,0,0,.11);
+}
+
+.chat-reply-quote .reply-sender {
+  font-size: 11px;
+  font-weight: 700;
+  opacity: .9;
+  margin-bottom: 2px;
+}
+
+.chat-reply-quote .reply-text {
+  font-size: 12px;
+  opacity: .75;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Variante dentro de bubble azul (mine) */
+#chatMsgs .chat-bubble.mine .chat-reply-quote {
+  background: rgba(255,255,255,.2);
+  border-left-color: rgba(255,255,255,.55);
+}
+
+#chatMsgs .chat-bubble.mine .chat-reply-quote:hover {
+  background: rgba(255,255,255,.28);
+}
+
+/* Reações abaixo do bubble */
+.chat-reactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.chat-reaction-item {
+  background: rgba(0,0,0,.07);
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 1px 7px;
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.12s;
+  line-height: 1.6;
+}
+
+.chat-reaction-item:hover {
+  background: rgba(0,0,0,.13);
+}
+
+.chat-reaction-item.mine {
+  background: rgba(47,125,246,.15);
+  border-color: rgba(47,125,246,.35);
+}
+
+/* Reações dentro do bubble mine (fundo azul) */
+#chatMsgs .chat-bubble.mine .chat-reaction-item {
+  background: rgba(255,255,255,.2);
+  border-color: transparent;
+}
+
+#chatMsgs .chat-bubble.mine .chat-reaction-item.mine {
+  background: rgba(255,255,255,.35);
+  border-color: rgba(255,255,255,.6);
+}
+
+/* Piscar ao rolar para mensagem original */
+@keyframes chat-bubble-flash {
+  0%, 100% { box-shadow: 0 2px 10px rgba(0,0,0,.08); }
+  50%       { box-shadow: 0 0 0 3px #2f7df6, 0 2px 10px rgba(0,0,0,.08); }
+}
+
+#chatMsgs .chat-bubble.chat-bubble-highlight {
+  animation: chat-bubble-flash 0.5s ease 3;
+}
+
+/* Barra de reply acima do input */
+.chat-reply-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #e9f2ff;
+  border-left: 3px solid #2f7df6;
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 12px;
+}
+
+.chat-reply-bar .reply-bar-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-reply-bar .reply-bar-sender {
+  font-weight: 700;
+  color: #2f7df6;
+  margin-bottom: 1px;
+}
+
+.chat-reply-bar .reply-bar-text {
+  color: #555;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#chatClearReply {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #888;
+  font-size: 16px;
+  line-height: 1;
+  flex-shrink: 0;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+
+#chatClearReply:hover {
+  color: #333;
+  background: rgba(0,0,0,.06);
+}
+
+/* ============================= */
 /* FIX 2: TEXTAREA AUTO-RESIZE   */
 /* ============================= */
 

@@ -1,7 +1,11 @@
+import logging
+
 from django.conf import settings
 from django.db import models
-from django.db.models.signals import post_save
+from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
+
+logger = logging.getLogger("core.models")
 
 
 class PerfilUsuario(models.Model):
@@ -33,11 +37,42 @@ class PerfilUsuario(models.Model):
         return f"Perfil de {self.user.username}"
 
 
+@receiver(pre_save, sender=settings.AUTH_USER_MODEL)
+def marcar_senha_mudou(sender, instance, **kwargs):
+    """
+    Antes de salvar o usuário, detecta se a senha mudou.
+    Seta instance._senha_mudou = True para uso no post_save.
+    Ignorado quando _skip_primeiro_acesso=True (evita loop na view primeiro_acesso).
+    """
+    if not instance.pk:
+        return  # novo usuário — tratado por criar_perfil_usuario
+    if getattr(instance, "_skip_primeiro_acesso", False):
+        return  # suprimido pela view primeiro_acesso
+    try:
+        antigo = sender.objects.get(pk=instance.pk)
+        if antigo.password != instance.password:
+            instance._senha_mudou = True
+    except sender.DoesNotExist:
+        pass
+
+
 @receiver(post_save, sender=settings.AUTH_USER_MODEL)
 def criar_perfil_usuario(sender, instance, created, **kwargs):
-    """Cria o perfil automaticamente quando um novo usuário é criado."""
+    """
+    Cria o perfil automaticamente quando um novo usuário é criado.
+    Se a senha mudou num usuário existente, força deve_trocar_senha = True.
+    """
     if created:
         PerfilUsuario.objects.get_or_create(user=instance)
+    elif getattr(instance, "_senha_mudou", False):
+        try:
+            perfil, _ = PerfilUsuario.objects.get_or_create(user=instance)
+            perfil.deve_trocar_senha = True
+            perfil.save(update_fields=["deve_trocar_senha"])
+        except Exception:
+            logger.exception(
+                "Erro ao setar deve_trocar_senha via signal para user pk=%s", instance.pk
+            )
 
 
 class UsuarioRestricaoModulo(models.Model):

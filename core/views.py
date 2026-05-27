@@ -35,6 +35,7 @@ def primeiro_acesso(request):
 
         if not erro:
             request.user.set_password(nova)
+            request.user._skip_primeiro_acesso = True  # suprime signal pre_save
             request.user.save()
             perfil.deve_trocar_senha = False
             perfil.save(update_fields=["deve_trocar_senha"])

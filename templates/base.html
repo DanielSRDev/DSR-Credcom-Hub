@@ -122,6 +122,14 @@
           <input id="chatOtherId" type="hidden" value="">
           <input id="chatMeId" type="hidden" value="{{ request.user.id }}">
 
+          <div id="chatReplyBar" style="display:none;" class="chat-reply-bar mb-1">
+            <div class="reply-bar-content">
+              <div class="reply-bar-sender" id="chatReplySender"></div>
+              <div class="reply-bar-text" id="chatReplyText"></div>
+            </div>
+            <button id="chatClearReply" type="button" title="Cancelar resposta">✕</button>
+          </div>
+
           <div class="d-flex gap-2">
             <button id="chatEmojiBtn" class="btn btn-sm btn-light" type="button" disabled title="Emoji">😊</button>
 

@@ -7,7 +7,7 @@ from django.shortcuts import get_object_or_404
 from django.views.decorators.http import require_GET, require_POST
 from django.contrib.auth import get_user_model
 
-from .models import ChatPresence, ChatMonitorConfig
+from .models import ChatPresence, ChatMonitorConfig, Message
 from .services import (
     allowed_contacts,
     can_send_to,
@@ -19,6 +19,8 @@ from .services import (
     send_text,
     mark_read_conversation,
     effective_status,
+    toggle_reaction,
+    ALLOWED_REACTION_EMOJIS,
 )
 
 User = get_user_model()
@@ -140,6 +142,24 @@ def history(request, user_id: int):
 
     items = []
     for m in msgs:
+        reply_to_data = None
+        if m.reply_to_id and m.reply_to:
+            rt = m.reply_to
+            reply_to_data = {
+                "id": rt.id,
+                "sender_name": (rt.sender.get_full_name() or rt.sender.get_username() if rt.sender else "?"),
+                "texto": (rt.texto or "")[:100],
+                "imagem_url": (rt.imagem.url if getattr(rt, "imagem", None) else None),
+            }
+
+        reactions = {}
+        for r in m.reactions.all():
+            if r.emoji not in reactions:
+                reactions[r.emoji] = {"count": 0, "mine": False}
+            reactions[r.emoji]["count"] += 1
+            if r.user_id == actor.id:
+                reactions[r.emoji]["mine"] = True
+
         items.append(
             {
                 "id": m.id,
@@ -152,6 +172,8 @@ def history(request, user_id: int):
                 "imagem_url": (m.imagem.url if getattr(m, "imagem", None) else None),
                 "criado_em": m.criado_em.isoformat(),
                 "is_me": m.sender_id == actor.id,
+                "reply_to": reply_to_data,
+                "reactions": reactions,
             }
         )
 
@@ -174,11 +196,12 @@ def send_message(request, user_id: int):
 
     texto = (request.POST.get("texto") or "").strip()
     imagem = request.FILES.get("imagem")
+    reply_to_id = (request.POST.get("reply_to_id") or "").strip() or None
 
     if not texto and not imagem:
         return JsonResponse({"error": "Mensagem vazia."}, status=400)
 
-    msg = send_text(me, other, texto, imagem=imagem)
+    msg = send_text(me, other, texto, imagem=imagem, reply_to_id=reply_to_id)
 
     return JsonResponse({
         "ok": True,
@@ -269,3 +292,25 @@ def set_status(request):
         "ok": True,
         "status": presence.status
     })
+
+
+@login_required
+@require_POST
+def react_message(request, message_id: int):
+    me = request.user
+    emoji = (request.POST.get("emoji") or "").strip()
+
+    if emoji not in ALLOWED_REACTION_EMOJIS:
+        return JsonResponse({"error": "Emoji inválido."}, status=400)
+
+    try:
+        msg = Message.objects.select_related("conversation").get(id=message_id)
+    except Message.DoesNotExist:
+        return JsonResponse({"error": "Mensagem não encontrada."}, status=404)
+
+    conv = msg.conversation
+    if me.id not in (conv.user1_id, conv.user2_id) and not me.is_superuser:
+        return JsonResponse({"error": "Sem permissão."}, status=403)
+
+    added = toggle_reaction(me, msg, emoji)
+    return JsonResponse({"ok": True, "added": added, "emoji": emoji})

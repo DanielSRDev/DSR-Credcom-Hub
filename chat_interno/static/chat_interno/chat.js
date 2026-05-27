@@ -16,7 +16,7 @@ window.ChatUI = (() => {
   let lastMarkAt = 0;
 
   let lastSoundId = 0;
-  let lastUnreadTotal = null; // null = primeira leitura, não notifica
+  let lastUnreadTotal = null;
 
   let suppressHistorySound = false;
   let myStatus = "offline";
@@ -25,20 +25,30 @@ window.ChatUI = (() => {
   let notificationPermissionRequested = false;
   const originalDocumentTitle = document.title || "Hub";
 
-  // Mapa de contatos para notificação com nome correto
   let contactsMap = {};
+
+  // Reply state
+  let replyTo = null;
 
   const soundMsg = new Audio("/static/chat_interno/sounds/msg.mp3");
   soundMsg.volume = 0.6;
+  let soundUnlocked = false;
 
   function unlockAudioOnce() {
-    document.addEventListener("click", () => {
-      soundMsg.play().then(() => { soundMsg.pause(); soundMsg.currentTime = 0; }).catch(() => {});
-    }, { once: true });
+    function tryUnlock() {
+      soundMsg.play()
+        .then(() => { soundMsg.pause(); soundMsg.currentTime = 0; soundUnlocked = true; document.removeEventListener("click", tryUnlock); })
+        .catch(() => {});
+    }
+    document.addEventListener("click", tryUnlock);
   }
 
   function playNewMessageSound() {
     try { soundMsg.currentTime = 0; soundMsg.play().catch(() => {}); } catch (_) {}
+  }
+
+  function myUserId() {
+    return Number(document.getElementById("chatMeId")?.value || 0);
   }
 
   function getCookie(name) {
@@ -88,7 +98,6 @@ window.ChatUI = (() => {
       .replace(/'/g, "&#039;");
   }
 
-  // FIX 2: preserva quebras de linha
   function formatTextWithLineBreaks(text) {
     if (!text) return "";
     return escapeHtml(text).replace(/\n/g, "<br>");
@@ -153,7 +162,6 @@ window.ChatUI = (() => {
     await refreshUnreadBadge();
   }
 
-  // FIX 4: ordena não lidos primeiro, depois status, depois nome
   function sortContacts(items) {
     const weight = (st) => st === "online" ? 2 : st === "ausente" ? 1 : 0;
     return (items || []).slice().sort((a, b) => {
@@ -205,19 +213,22 @@ window.ChatUI = (() => {
     }
     container.appendChild(toast);
     setTimeout(() => toast.classList.add("show"), 10);
-    setTimeout(() => { toast.classList.remove("show"); setTimeout(() => toast.remove(), 250); }, 5000);
+    setTimeout(() => { toast.classList.remove("show"); setTimeout(() => toast.remove(), 250); }, 6000);
   }
 
+  // ─── Notificação browser (apenas HTTPS/localhost) ──────────────────────────
   async function requestBrowserNotificationPermissionOnce() {
+    if (!window.isSecureContext) return "insecure";
     if (!("Notification" in window)) return "unsupported";
     if (Notification.permission === "granted") return "granted";
     if (Notification.permission === "denied") return "denied";
     if (notificationPermissionRequested) return Notification.permission;
     notificationPermissionRequested = true;
-    try { return await Notification.requestPermission(); } catch (err) { return "default"; }
+    try { return await Notification.requestPermission(); } catch (_) { return "default"; }
   }
 
   function showBrowserNotification(title, body, otherUserId = null) {
+    if (!window.isSecureContext) return false;
     if (!("Notification" in window) || Notification.permission !== "granted") return false;
     try {
       const n = new Notification(title, {
@@ -238,7 +249,6 @@ window.ChatUI = (() => {
     } catch (_) {}
   }
 
-  // FIX 1+3: notifica com nome correto e sempre (não só document.hidden)
   function notifyIncomingMessage({ messageId, senderName, text, otherUserId }) {
     if (!messageId || messageId <= lastNotifiedMessageId) return;
     lastNotifiedMessageId = messageId;
@@ -248,6 +258,33 @@ window.ChatUI = (() => {
     playNewMessageSound();
     showBrowserNotification(title, body, otherUserId);
     flashDocumentTitle();
+  }
+
+  // ─── Reply ─────────────────────────────────────────────────────────────────
+  function setReply(msgId, senderLabel, texto) {
+    replyTo = { id: msgId, sender: senderLabel, texto };
+    const bar = document.getElementById("chatReplyBar");
+    const senderEl = document.getElementById("chatReplySender");
+    const textEl = document.getElementById("chatReplyText");
+    if (bar) bar.style.display = "";
+    if (senderEl) senderEl.textContent = `Respondendo a: ${senderLabel}`;
+    if (textEl) textEl.textContent = texto || "[imagem]";
+    document.getElementById("chatInput")?.focus();
+  }
+
+  function clearReply() {
+    replyTo = null;
+    const bar = document.getElementById("chatReplyBar");
+    if (bar) bar.style.display = "none";
+  }
+
+  // ─── Reactions ─────────────────────────────────────────────────────────────
+  async function toggleReaction(msgId, emoji) {
+    const fd = new FormData();
+    fd.append("emoji", emoji);
+    await apiPost(`/chat/react/${msgId}/`, fd);
+    lastRenderedLastId = 0; // força re-render sem esperar o próximo poll
+    await loadHistory(false);
   }
 
   async function loadContacts() {
@@ -262,7 +299,6 @@ window.ChatUI = (() => {
       paintStatusButtons();
     }
 
-    // Atualiza mapa de nomes para notificações
     (data.items || []).forEach((u) => {
       contactsMap[u.id] = { nome: u.nome, username: u.username };
     });
@@ -310,7 +346,6 @@ window.ChatUI = (() => {
       btn.type = "button";
       btn.dataset.userId = u.id;
 
-      // FIX 4: destaque visual
       const hasUnread = u.unread > 0;
       btn.className = "list-group-item list-group-item-action" + (hasUnread ? " chat-item-unread" : "");
 
@@ -341,6 +376,7 @@ window.ChatUI = (() => {
     suppressHistorySound = true;
     lastRenderedLastId = 0;
     lastSoundId = 0;
+    clearReply();
 
     const otherHidden = document.getElementById("chatOtherId");
     if (otherHidden) otherHidden.value = currentOtherId;
@@ -384,20 +420,44 @@ window.ChatUI = (() => {
       const wasAtBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
       box.innerHTML = "";
 
+      const me = myUserId();
+
       items.forEach((m) => {
         const wrap = document.createElement("div");
-        wrap.className = `mb-2 d-flex ${m.is_me ? "justify-content-end" : "justify-content-start"}`;
+        wrap.className = `mb-2 d-flex align-items-center chat-msg-wrap ${m.is_me ? "justify-content-end" : "justify-content-start"}`;
+        wrap.dataset.msgId = m.id;
 
         const bubble = document.createElement("div");
         bubble.className = `chat-bubble ${m.is_me ? "mine" : "theirs"}`;
 
-        // FIX 3: nome real do remetente
         const senderLabel = m.is_me ? "Você" : (m.sender_name || "Contato");
 
-        // FIX 2: quebra de linha preservada
-        const textoHtml = m.texto ? `<div class="body">${formatTextWithLineBreaks(m.texto)}</div>` : "";
+        // Bloco de citação (reply_to)
+        if (m.reply_to) {
+          const rt = m.reply_to;
+          const rtSender = rt.sender_name || "?";
+          const rtText = rt.texto
+            ? (rt.texto.length > 80 ? rt.texto.substring(0, 80) + "…" : rt.texto)
+            : (rt.imagem_url ? "[imagem]" : "");
+          const quote = document.createElement("div");
+          quote.className = "chat-reply-quote";
+          quote.dataset.replyId = rt.id;
+          quote.innerHTML = `<div class="reply-sender">${escapeHtml(rtSender)}</div><div class="reply-text">${escapeHtml(rtText)}</div>`;
+          bubble.appendChild(quote);
+        }
 
-        bubble.innerHTML = `<div class="meta">${escapeHtml(senderLabel)} • ${formatDate(m.criado_em)}</div>${textoHtml}`;
+        // Meta + texto
+        const meta = document.createElement("div");
+        meta.className = "meta";
+        meta.textContent = `${senderLabel} • ${formatDate(m.criado_em)}`;
+        bubble.appendChild(meta);
+
+        if (m.texto) {
+          const body = document.createElement("div");
+          body.className = "body";
+          body.innerHTML = formatTextWithLineBreaks(m.texto);
+          bubble.appendChild(body);
+        }
 
         if (m.imagem_url) {
           const img = document.createElement("img");
@@ -407,7 +467,57 @@ window.ChatUI = (() => {
           bubble.appendChild(img);
         }
 
-        wrap.appendChild(bubble);
+        // Reactions
+        const reactions = m.reactions || {};
+        const reactionEntries = Object.entries(reactions);
+        if (reactionEntries.length > 0) {
+          const reactionDiv = document.createElement("div");
+          reactionDiv.className = "chat-reactions";
+          reactionEntries.forEach(([emoji, info]) => {
+            const span = document.createElement("span");
+            span.className = "chat-reaction-item" + (info.mine ? " mine" : "");
+            span.dataset.action = "react";
+            span.dataset.msgId = m.id;
+            span.dataset.emoji = emoji;
+            span.textContent = `${emoji} ${info.count}`;
+            reactionDiv.appendChild(span);
+          });
+          bubble.appendChild(reactionDiv);
+        }
+
+        // Botões de ação (visíveis no hover)
+        const actions = document.createElement("div");
+        actions.className = "chat-msg-actions";
+
+        const replyBtn = document.createElement("button");
+        replyBtn.className = "chat-action-btn";
+        replyBtn.dataset.action = "reply";
+        replyBtn.dataset.msgId = m.id;
+        replyBtn.dataset.sender = senderLabel;
+        replyBtn.dataset.texto = (m.texto || "").substring(0, 100);
+        replyBtn.title = "Responder";
+        replyBtn.textContent = "↩";
+
+        const reactBtn = document.createElement("button");
+        reactBtn.className = "chat-action-btn";
+        reactBtn.dataset.action = "react";
+        reactBtn.dataset.msgId = m.id;
+        reactBtn.dataset.emoji = "👍";
+        reactBtn.title = "Curtir";
+        reactBtn.textContent = "👍";
+
+        actions.appendChild(replyBtn);
+        actions.appendChild(reactBtn);
+
+        // "mine" → ações à esquerda do bubble; "theirs" → ações à direita
+        if (m.is_me) {
+          wrap.appendChild(actions);
+          wrap.appendChild(bubble);
+        } else {
+          wrap.appendChild(bubble);
+          wrap.appendChild(actions);
+        }
+
         box.appendChild(wrap);
       });
 
@@ -437,11 +547,13 @@ window.ChatUI = (() => {
         const now = Date.now();
         if (now - lastMarkAt > 1500) { lastMarkAt = now; await markRead(currentOtherId); }
         await loadContacts();
+      } else if (!lastId) {
+        // sem mensagens — garante que lastRenderedLastId fica zerado para nova conversa
+        lastRenderedLastId = 0;
       }
     } finally { historyLoading = false; }
   }
 
-  // FIX 1: verifica mensagens mesmo com chat fechado
   async function checkNewMessagesWhileClosed() {
     const panel = document.getElementById("chatPanel");
     const isOpen = panel && panel.classList.contains("open");
@@ -486,7 +598,6 @@ window.ChatUI = (() => {
     lastUnreadTotal = totalUnread;
   }
 
-  // FIX 5: helpers para imagem colada
   function dataURLtoBlob(dataURL) {
     try {
       const arr = dataURL.split(",");
@@ -550,7 +661,6 @@ window.ChatUI = (() => {
       const file = document.getElementById("chatImg");
       if (!input) return;
 
-      // FIX 2: preserva conteúdo sem trim agressivo (só remove newlines finais)
       const texto = (input.value || "").replace(/\n+$/, "");
       const otherId = currentOtherId || Number(document.getElementById("chatOtherId")?.value || 0);
       if (!otherId) return;
@@ -570,6 +680,7 @@ window.ChatUI = (() => {
         const blob = dataURLtoBlob(pastedImage);
         if (blob) fd.append("imagem", blob, "imagem_colada.png");
       }
+      if (replyTo && replyTo.id) fd.append("reply_to_id", replyTo.id);
 
       const data = await apiPost(`/chat/send/${otherId}/`, fd);
       if (data?.error) { alert(data.error); return; }
@@ -577,6 +688,7 @@ window.ChatUI = (() => {
       input.value = "";
       if (file) file.value = "";
       clearPastedImagePreview();
+      clearReply();
 
       await loadHistory(true);
     } finally { sending = false; }
@@ -592,8 +704,47 @@ window.ChatUI = (() => {
     const imgBtn = document.getElementById("chatImgBtn");
     const imgIn = document.getElementById("chatImg");
     const exportBtn = document.getElementById("chatExportBtn");
+    const clearReplyBtn = document.getElementById("chatClearReply");
 
     if (sendBtn) sendBtn.addEventListener("click", (e) => { e.preventDefault(); send(); });
+
+    if (clearReplyBtn) clearReplyBtn.addEventListener("click", clearReply);
+
+    // Delegação de eventos na área de mensagens
+    const msgsBox = document.getElementById("chatMsgs");
+    if (msgsBox) {
+      msgsBox.addEventListener("click", (e) => {
+        // Botões de ação (reply / react) e badges de reação
+        const btn = e.target.closest("[data-action]");
+        if (btn) {
+          const action = btn.dataset.action;
+          const msgId = Number(btn.dataset.msgId || 0);
+          if (!msgId) return;
+
+          if (action === "reply") {
+            setReply(msgId, btn.dataset.sender || "?", btn.dataset.texto || "");
+          } else if (action === "react" && !actorUserId) {
+            toggleReaction(msgId, btn.dataset.emoji || "👍").catch(() => {});
+          }
+          return;
+        }
+
+        // Clique no bloco de citação → rola até a mensagem original
+        const quote = e.target.closest("[data-reply-id]");
+        if (quote) {
+          const replyId = quote.dataset.replyId;
+          const orig = msgsBox.querySelector(`.chat-msg-wrap[data-msg-id="${replyId}"]`);
+          if (orig) {
+            orig.scrollIntoView({ behavior: "smooth", block: "center" });
+            const bbl = orig.querySelector(".chat-bubble");
+            if (bbl) {
+              bbl.classList.add("chat-bubble-highlight");
+              setTimeout(() => bbl.classList.remove("chat-bubble-highlight"), 1600);
+            }
+          }
+        }
+      });
+    }
 
     if (exportBtn) {
       exportBtn.addEventListener("click", (e) => {
@@ -615,13 +766,10 @@ window.ChatUI = (() => {
     }
 
     if (input) {
-      // FIX 2: Enter envia, Shift+Enter = nova linha
       input.addEventListener("keydown", (e) => {
         if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
-        // Shift+Enter: o textarea cuida sozinho da nova linha
       });
 
-      // FIX 5: colar imagem do clipboard (Ctrl+V)
       input.addEventListener("paste", (e) => {
         const items = (e.clipboardData || e.originalEvent?.clipboardData)?.items;
         if (!items) return;
@@ -662,7 +810,6 @@ window.ChatUI = (() => {
 
     if (!started) {
       started = true;
-      // FIX 1: timer para notificar mesmo com chat fechado
       unreadTimer = setInterval(() => { checkNewMessagesWhileClosed().catch(() => {}); }, 4000);
     }
 
