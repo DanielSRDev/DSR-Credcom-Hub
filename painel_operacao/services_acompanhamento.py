@@ -1,10 +1,16 @@
 from collections import defaultdict
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 
 from django.db.models import Q, Sum
 
-from .models import CarteiraSupervisor, MetaOperadorCarteira, PainelOperacaoRelatorioGeral, SupervisorPainel
+from .models import (
+    CarteiraSupervisor,
+    MetaOperadorCarteira,
+    PainelConfiguracao,
+    PainelOperacaoRelatorioGeral,
+    SupervisorPainel,
+)
 
 
 ZERO = Decimal("0.00")
@@ -64,21 +70,6 @@ def linked_credores_ids():
 
 
 def qs_relatorio_vinculado():
-    """
-    Retorna todos os registros de PainelOperacaoRelatorioGeral sem filtros
-    de credor ou operador.
-
-    Motivo da mudança:
-    - O filtro anterior cre_id__in=linked_credores_ids() descartava
-      silenciosamente registros de credores ainda não cadastrados em
-      CarteiraSupervisor, causando divergência entre o dashboard e o Excel.
-    - O exclude(emitido_por_nome="") descartava registros onde o operador
-      não foi resolvido via alias — esses aparecem normalmente no Excel.
-
-    Filtros de credor/supervisor são aplicados em aplicar_filtros_relatorio
-    apenas quando o usuário seleciona explicitamente. O dashboard sem filtro
-    deve mostrar o mesmo total que o Excel exportado.
-    """
     return PainelOperacaoRelatorioGeral.objects.all()
 
 
@@ -153,7 +144,59 @@ def somar_linha_em_grupo(destino, registro):
     destino["qtd"] += 1
 
 
-def preparar_metricas_com_meta(item, meta):
+def calcular_pct_quebra_operador(quebra, pago):
+    """% de quebra = quebra / (quebra + pago), retorna como 0-100."""
+    quebra = decimal_or_zero(quebra)
+    pago = decimal_or_zero(pago)
+    base = quebra + pago
+    if base <= 0:
+        return ZERO
+    return ((quebra / base) * Decimal("100")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def calcular_projecao_emissao(meta, pct_quebra):
+    """Projeção emissão do mês = (meta * % quebra) + meta."""
+    meta = decimal_or_zero(meta)
+    pct_quebra = decimal_or_zero(pct_quebra)
+    fator = pct_quebra / Decimal("100")
+    return (meta * fator + meta).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def calcular_meta_do_dia(projecao_emissao, emissao, dias_faltantes):
+    """Meta do dia = (projeção emissão - emissão acumulada) / dias faltantes."""
+    projecao_emissao = decimal_or_zero(projecao_emissao)
+    emissao = decimal_or_zero(emissao)
+    if not dias_faltantes or dias_faltantes <= 0:
+        return ZERO
+    diferenca = projecao_emissao - emissao
+    if diferenca <= 0:
+        return ZERO
+    return (diferenca / Decimal(str(dias_faltantes))).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def calcular_dias_faltantes(dias_uteis_mes=None, hoje=None):
+    """
+    Conta dias úteis (seg-sex) do dia SEGUINTE até o fim do mês.
+
+    Não inclui hoje: o dia atual já está em andamento e não entra no
+    denominador da Meta do Dia. O parâmetro dias_uteis_mes não é usado
+    no cálculo — é mantido apenas para exibição no KPI.
+    """
+    import calendar as _cal
+    if hoje is None:
+        hoje = date.today()
+    ultimo = _cal.monthrange(hoje.year, hoje.month)[1]
+    fim_mes = date(hoje.year, hoje.month, ultimo)
+    dia = hoje + timedelta(days=1)
+    faltantes = 0
+    while dia <= fim_mes:
+        if dia.weekday() < 5:
+            faltantes += 1
+        dia += timedelta(days=1)
+    return faltantes
+
+
+def preparar_metricas_com_meta(item, meta, dias_faltantes=0):
     item["meta"] = decimal_or_zero(meta)
     item["faltante"] = item["meta"] - item["pago"]
     if item["faltante"] < 0:
@@ -166,7 +209,44 @@ def preparar_metricas_com_meta(item, meta):
     item["pct_meta"] = percentual(item["pago"], item["meta"])
     item["pct_meta_css"] = format(limitar_percentual_css(item["pct_meta"]), "f")
     item["classe_meta"] = classe_percentual_meta(item["pct_meta"])
+
+    item["pct_quebra"] = calcular_pct_quebra_operador(item["quebra"], item["pago"])
+    item["projecao_emissao"] = calcular_projecao_emissao(item["meta"], item["pct_quebra"])
+    item["meta_do_dia"] = calcular_meta_do_dia(item["projecao_emissao"], item["emissao"], dias_faltantes)
+
     return item
+
+
+def coletar_fora_do_padrao(qs, registered_cre_ids):
+    """
+    Agrega registros cujo cre_id não está cadastrado em CarteiraSupervisor.
+
+    Retorna lista de dicts: cre_id, credor, emissao, pago, avencer, quebra, qtd.
+    """
+    grupos = {}
+    for registro in qs:
+        cre_id = registro.cre_id
+        if cre_id is None or cre_id in registered_cre_ids:
+            continue
+        credor_nome = registro.credor or "SEM NOME"
+        chave = (cre_id, credor_nome)
+        grupos.setdefault(chave, {
+            "cre_id": cre_id,
+            "credor": credor_nome,
+            "emissao": ZERO,
+            "pago": ZERO,
+            "avencer": ZERO,
+            "quebra": ZERO,
+            "qtd": 0,
+        })
+        grupo = grupos[chave]
+        grupo["emissao"] += decimal_or_zero(registro.valor_emissao)
+        grupo["pago"] += decimal_or_zero(registro.valor_pago)
+        grupo["avencer"] += decimal_or_zero(registro.valor_avencer)
+        grupo["quebra"] += decimal_or_zero(registro.valor_quebra)
+        grupo["qtd"] += 1
+
+    return sorted(grupos.values(), key=lambda x: x["emissao"], reverse=True)
 
 
 def montar_acompanhamento_geral(data_ini=None, data_fim=None, supervisor=None, operador=None, credor=None):
@@ -179,13 +259,31 @@ def montar_acompanhamento_geral(data_ini=None, data_fim=None, supervisor=None, o
     ano_meta = data_fim.year
     mes_meta = data_fim.month
 
-    qs = aplicar_filtros_relatorio(
+    # Dias úteis do mês vigente a partir da configuração global.
+    config = PainelConfiguracao.objects.filter(ativo=True).first()
+    dias_uteis_mes = config.dias_uteis_mes if config else 22
+    dias_faltantes = calcular_dias_faltantes(dias_uteis_mes)
+
+    # IDs de credores registrados em CarteiraSupervisor ativa.
+    registered_cre_ids = set(
+        CarteiraSupervisor.objects
+        .filter(ativo=True, supervisor__ativo=True)
+        .exclude(cre_id__isnull=True)
+        .values_list("cre_id", flat=True)
+    )
+
+    qs_total = aplicar_filtros_relatorio(
         data_ini=data_ini,
         data_fim=data_fim,
         supervisor=supervisor,
         operador=operador,
         credor=credor,
     ).order_by("emitido_por_nome", "credor", "-data_referencia")
+
+    # Separa registros com carteiras cadastradas dos que estão fora do padrão.
+    # Registros fora do padrão são exibidos como alerta mas não somam nas métricas.
+    qs = qs_total.filter(cre_id__in=registered_cre_ids) if registered_cre_ids else qs_total.none()
+    fora_do_padrao = coletar_fora_do_padrao(qs_total, registered_cre_ids)
 
     metas_qs = aplicar_filtros_metas(
         ano=ano_meta,
@@ -219,8 +317,6 @@ def montar_acompanhamento_geral(data_ini=None, data_fim=None, supervisor=None, o
         cre_id = registro.cre_id
         credor_nome = registro.credor or "SEM CARTEIRA"
 
-        # Registros sem operador entram nos totais gerais mas não são
-        # agrupados por operador/carteira (não existem na lista de metas).
         if not nome_operador:
             continue
 
@@ -269,7 +365,7 @@ def montar_acompanhamento_geral(data_ini=None, data_fim=None, supervisor=None, o
         meta = mapas_meta["operador"].get(chave_nome, ZERO)
         if not meta and chave_login:
             meta = mapas_meta["operador"].get(chave_login, ZERO)
-        operadores_lista.append(preparar_metricas_com_meta(item, meta))
+        operadores_lista.append(preparar_metricas_com_meta(item, meta, dias_faltantes))
 
     supervisores_lista = []
     nomes_supervisores = set(supervisores.keys()) | set(mapas_meta["supervisor"].keys())
@@ -282,7 +378,7 @@ def montar_acompanhamento_geral(data_ini=None, data_fim=None, supervisor=None, o
             "quebra": ZERO,
             "qtd": 0,
         })
-        supervisores_lista.append(preparar_metricas_com_meta(item, mapas_meta["supervisor"].get(nome, ZERO)))
+        supervisores_lista.append(preparar_metricas_com_meta(item, mapas_meta["supervisor"].get(nome, ZERO), dias_faltantes))
 
     operador_carteira_lista = []
     for item in operador_carteira.values():
@@ -292,7 +388,7 @@ def montar_acompanhamento_geral(data_ini=None, data_fim=None, supervisor=None, o
         meta = mapas_meta["operador_carteira"].get((chave_nome, cre_id), ZERO)
         if not meta and chave_login:
             meta = mapas_meta["operador_carteira"].get((chave_login, cre_id), ZERO)
-        operador_carteira_lista.append(preparar_metricas_com_meta(item, meta))
+        operador_carteira_lista.append(preparar_metricas_com_meta(item, meta, dias_faltantes))
 
     # Também mostra metas cadastradas mesmo quando ainda não existe produção no período.
     chaves_existentes = set()
@@ -327,7 +423,7 @@ def montar_acompanhamento_geral(data_ini=None, data_fim=None, supervisor=None, o
             "quebra": ZERO,
             "qtd": 0,
         }
-        operador_carteira_lista.append(preparar_metricas_com_meta(item, meta.meta_mensal))
+        operador_carteira_lista.append(preparar_metricas_com_meta(item, meta.meta_mensal, dias_faltantes))
 
     operadores_lista = [
         item for item in operadores_lista
@@ -385,6 +481,8 @@ def montar_acompanhamento_geral(data_ini=None, data_fim=None, supervisor=None, o
         "total_status": total_status,
         "qtd_registros": qs.count(),
         "qtd_metas": metas_qs.count(),
+        "dias_uteis_mes": dias_uteis_mes,
+        "dias_faltantes": dias_faltantes,
     }
 
     return {
@@ -394,4 +492,5 @@ def montar_acompanhamento_geral(data_ini=None, data_fim=None, supervisor=None, o
         "operador_carteira": operador_carteira_lista,
         "metas": list(metas_qs),
         "queryset": qs,
+        "fora_do_padrao": fora_do_padrao,
     }

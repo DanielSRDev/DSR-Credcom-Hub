@@ -100,22 +100,23 @@ SELECT
     b.aco_data AS data_acordo,
     ev.evc_data AS data_emissao,
     b.aco_etl_alteracao AS data_etl_alteracao,
-    b.pes_nome AS cliente,
-    b.pes_cpfcnpj AS cpf_cnpj,
-    b.con_numero AS contrato,
-    b.con_id AS con_id,
-    cr.cre_id AS cre_id,
-    cr.cre_sigla AS credor,
+    COALESCE(b.pes_nome, pss_ev.pes_nome) AS cliente,
+    COALESCE(b.pes_cpfcnpj, pss_ev.pes_cpfcnpj) AS cpf_cnpj,
+    COALESCE(b.con_numero, con_ev.con_numero) AS contrato,
+    COALESCE(b.con_id, con_ev.con_id) AS con_id,
+    COALESCE(cr.cre_id, cr_ev.cre_id) AS cre_id,
+    COALESCE(cr.cre_sigla, cr_ev.cre_sigla) AS credor,
     b.con_obs AS observacao_contrato,
     CONCAT(
-        COALESCE(cf.fil_codigo, ''),
+        COALESCE(cf.fil_codigo, cf_ev.fil_codigo, ''),
         CASE
-            WHEN cf.fil_codigo IS NOT NULL AND cf.fil_nome IS NOT NULL THEN ' - '
+            WHEN COALESCE(cf.fil_codigo, cf_ev.fil_codigo) IS NOT NULL
+             AND COALESCE(cf.fil_nome, cf_ev.fil_nome) IS NOT NULL THEN ' - '
             ELSE ''
         END,
-        COALESCE(cf.fil_nome, '')
+        COALESCE(cf.fil_nome, cf_ev.fil_nome, '')
     ) AS filial,
-    pr.pro_nome AS tipo_contrato,
+    COALESCE(pr.pro_nome, pr_ev.pro_nome) AS tipo_contrato,
     STRING_AGG(ac_tipo.cca_valor, ' | ') AS tipo_negociacao,
     b.aco_principal AS principal_bruto,
     ISNULL(b.aco_desc_princ, 0) AS desconto_principal,
@@ -151,6 +152,17 @@ LEFT JOIN dbo.tb_produto pr
     ON pr.pro_id = b.pro_id
 LEFT JOIN dbo.tb_acordo_status ast
     ON ast.aco_status = b.aco_status
+-- Fallback via cli_id do evento (cobre acordos sem vínculo parcela→negociação→contrato)
+LEFT JOIN dbo.tb_pessoa pss_ev
+    ON pss_ev.pes_id = ev.cli_id
+LEFT JOIN (
+    SELECT con.cli_id, con.cre_id, con.con_numero, con.con_id, con.fil_id, con.pro_id,
+           ROW_NUMBER() OVER (PARTITION BY con.cli_id ORDER BY con.con_id DESC) AS rn
+    FROM dbo.tb_contrato con
+) con_ev ON con_ev.cli_id = ev.cli_id AND con_ev.rn = 1
+LEFT JOIN dbo.tb_credor cr_ev    ON cr_ev.cre_id = con_ev.cre_id
+LEFT JOIN dbo.tb_credor_filial cf_ev ON cf_ev.fil_id = con_ev.fil_id
+LEFT JOIN dbo.tb_produto pr_ev   ON pr_ev.pro_id = con_ev.pro_id
 LEFT JOIN tipo_negociacao_campo tnc
     ON 1 = 1
 LEFT JOIN dbo.tb_acordo_campo ac_tipo
@@ -194,7 +206,16 @@ GROUP BY
     b.aco_num_parc,
     ast.aco_status_descricao,
     b.aco_tipo,
-    ev.ope_login
+    ev.ope_login,
+    pss_ev.pes_nome,
+    pss_ev.pes_cpfcnpj,
+    con_ev.con_numero,
+    con_ev.con_id,
+    cr_ev.cre_id,
+    cr_ev.cre_sigla,
+    cf_ev.fil_codigo,
+    cf_ev.fil_nome,
+    pr_ev.pro_nome
 ORDER BY ev.evc_data DESC
 """
 
@@ -293,20 +314,21 @@ SELECT
     ev.evc_data AS data_emissao,
     CAST(NULL AS DATETIME) AS data_pagamento,
     b.aco_etl_alteracao AS data_etl_alteracao,
-    b.pes_nome AS cliente,
-    b.pes_cpfcnpj AS cpf_cnpj,
-    b.con_numero AS contrato,
-    cr.cre_id AS cre_id,
-    cr.cre_sigla AS credor,
+    COALESCE(b.pes_nome, pss_ev.pes_nome) AS cliente,
+    COALESCE(b.pes_cpfcnpj, pss_ev.pes_cpfcnpj) AS cpf_cnpj,
+    COALESCE(b.con_numero, con_ev.con_numero) AS contrato,
+    COALESCE(cr.cre_id, cr_ev.cre_id) AS cre_id,
+    COALESCE(cr.cre_sigla, cr_ev.cre_sigla) AS credor,
     CONCAT(
-        COALESCE(cf.fil_codigo, ''),
+        COALESCE(cf.fil_codigo, cf_ev.fil_codigo, ''),
         CASE
-            WHEN cf.fil_codigo IS NOT NULL AND cf.fil_nome IS NOT NULL THEN ' - '
+            WHEN COALESCE(cf.fil_codigo, cf_ev.fil_codigo) IS NOT NULL
+             AND COALESCE(cf.fil_nome, cf_ev.fil_nome) IS NOT NULL THEN ' - '
             ELSE ''
         END,
-        COALESCE(cf.fil_nome, '')
+        COALESCE(cf.fil_nome, cf_ev.fil_nome, '')
     ) AS filial,
-    pr.pro_nome AS tipo_contrato,
+    COALESCE(pr.pro_nome, pr_ev.pro_nome) AS tipo_contrato,
     STRING_AGG(ac_tipo.cca_valor, ' | ') AS tipo_negociacao,
     b.aco_ho AS honorario_bruto,
     b.desconto_honorario AS desconto_honorario,
@@ -335,6 +357,17 @@ LEFT JOIN dbo.tb_acordo_campo ac_tipo
     ON ac_tipo.aco_id = b.aco_id
    AND ac_tipo.cca_id = tnc.cca_id
    AND ac_tipo.cca_valor IS NOT NULL
+-- Fallback via cli_id do evento (cobre acordos sem vínculo parcela→negociação→contrato)
+LEFT JOIN dbo.tb_pessoa pss_ev
+    ON pss_ev.pes_id = ev.cli_id
+LEFT JOIN (
+    SELECT con.cli_id, con.cre_id, con.con_numero, con.fil_id, con.pro_id,
+           ROW_NUMBER() OVER (PARTITION BY con.cli_id ORDER BY con.con_id DESC) AS rn
+    FROM dbo.tb_contrato con
+) con_ev ON con_ev.cli_id = ev.cli_id AND con_ev.rn = 1
+LEFT JOIN dbo.tb_credor cr_ev    ON cr_ev.cre_id = con_ev.cre_id
+LEFT JOIN dbo.tb_credor_filial cf_ev ON cf_ev.fil_id = con_ev.fil_id
+LEFT JOIN dbo.tb_produto pr_ev   ON pr_ev.pro_id = con_ev.pro_id
 WHERE ev.evc_data >= %s
   AND ev.evc_data < DATEADD(DAY, 1, %s)
 GROUP BY
@@ -356,7 +389,15 @@ GROUP BY
     b.aco_num_parc,
     ast.aco_status_descricao,
     b.aco_tipo,
-    ev.ope_login
+    ev.ope_login,
+    pss_ev.pes_nome,
+    pss_ev.pes_cpfcnpj,
+    con_ev.con_numero,
+    cr_ev.cre_id,
+    cr_ev.cre_sigla,
+    cf_ev.fil_codigo,
+    cf_ev.fil_nome,
+    pr_ev.pro_nome
 ORDER BY ev.evc_data DESC
 """
 
@@ -388,6 +429,7 @@ evento_acordo AS (
     SELECT
         ce.evc_id,
         ce.evc_data,
+        ce.cli_id,
         ce.ope_id,
         op.ope_login,
         ROW_NUMBER() OVER (
@@ -485,25 +527,26 @@ SELECT
     pg.data_pagamento AS data_pagamento,
 
     b.aco_etl_alteracao AS data_etl_alteracao,
-    b.pes_nome AS cliente,
-    b.pes_cpfcnpj AS cpf_cnpj,
-    b.con_numero AS contrato,
+    COALESCE(b.pes_nome, pss_ev.pes_nome) AS cliente,
+    COALESCE(b.pes_cpfcnpj, pss_ev.pes_cpfcnpj) AS cpf_cnpj,
+    COALESCE(b.con_numero, con_ev.con_numero) AS contrato,
     b.con_id AS con_id,
     b.con_obs AS observacao_contrato,
 
-    cr.cre_id AS cre_id,
-    cr.cre_sigla AS credor,
+    COALESCE(cr.cre_id, cr_ev.cre_id) AS cre_id,
+    COALESCE(cr.cre_sigla, cr_ev.cre_sigla) AS credor,
 
     CONCAT(
-        COALESCE(cf.fil_codigo, ''),
+        COALESCE(cf.fil_codigo, cf_ev.fil_codigo, ''),
         CASE
-            WHEN cf.fil_codigo IS NOT NULL AND cf.fil_nome IS NOT NULL THEN ' - '
+            WHEN COALESCE(cf.fil_codigo, cf_ev.fil_codigo) IS NOT NULL
+             AND COALESCE(cf.fil_nome, cf_ev.fil_nome) IS NOT NULL THEN ' - '
             ELSE ''
         END,
-        COALESCE(cf.fil_nome, '')
+        COALESCE(cf.fil_nome, cf_ev.fil_nome, '')
     ) AS filial,
 
-    pr.pro_nome AS tipo_contrato,
+    COALESCE(pr.pro_nome, pr_ev.pro_nome) AS tipo_contrato,
     CAST(NULL AS VARCHAR(255)) AS tipo_negociacao,
 
     b.aco_principal - b.desconto_principal AS principal_liquido,
@@ -541,6 +584,17 @@ LEFT JOIN dbo.tb_produto pr
     ON pr.pro_id = b.pro_id
 LEFT JOIN dbo.tb_acordo_status ast
     ON ast.aco_status = b.aco_status
+-- Fallback via cli_id do evento (cobre acordos sem vínculo parcela→negociação→contrato)
+LEFT JOIN dbo.tb_pessoa pss_ev
+    ON pss_ev.pes_id = ev.cli_id
+LEFT JOIN (
+    SELECT con.cli_id, con.cre_id, con.con_numero, con.fil_id, con.pro_id,
+           ROW_NUMBER() OVER (PARTITION BY con.cli_id ORDER BY con.con_id DESC) AS rn
+    FROM dbo.tb_contrato con
+) con_ev ON con_ev.cli_id = ev.cli_id AND con_ev.rn = 1
+LEFT JOIN dbo.tb_credor cr_ev    ON cr_ev.cre_id = con_ev.cre_id
+LEFT JOIN dbo.tb_credor_filial cf_ev ON cf_ev.fil_id = con_ev.fil_id
+LEFT JOIN dbo.tb_produto pr_ev   ON pr_ev.pro_id = con_ev.pro_id
 
 WHERE pg.rn = 1
 

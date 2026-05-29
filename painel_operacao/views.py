@@ -84,7 +84,11 @@ CONTRATANTE_MAP = {
     "VILA":   "Vila Brasil",
     "GPL":    "GPL",
     "HB":    "HB CONSTRUTORA",
+    "LOG":    "Colégio Logosófico",
+    "AM3":    "AM3 Imobiliária",
+
 }
+
 
 
 def normalizar_contratante(sigla) -> str:
@@ -620,6 +624,36 @@ def atualizar_relatorio_geral_view(request):
             f"Período usado: {data_ini.strftime('%d/%m/%Y')} até {data_fim.strftime('%d/%m/%Y')}"
         )
 
+        # Verifica carteiras nos dados sincronizados que não estão cadastradas no sistema.
+        registered_cre_ids = set(
+            CarteiraSupervisor.objects
+            .filter(ativo=True)
+            .exclude(cre_id__isnull=True)
+            .values_list("cre_id", flat=True)
+        )
+        nao_cadastradas = (
+            PainelOperacaoRelatorioGeral.objects
+            .filter(data_referencia__gte=data_ini, data_referencia__lte=data_fim)
+            .exclude(cre_id__isnull=True)
+            .exclude(cre_id__in=registered_cre_ids)
+            .values("cre_id", "credor")
+            .distinct()
+            .order_by("credor")
+        )
+        if nao_cadastradas.exists():
+            credores_texto = "; ".join(
+                f"{item['credor']} (ID: {item['cre_id']})"
+                for item in nao_cadastradas[:10]
+            )
+            total = nao_cadastradas.count()
+            sufixo = f" e mais {total - 10} outra(s)" if total > 10 else ""
+            messages.warning(
+                request,
+                f"Atenção: {total} carteira(s) nos dados sincronizados não estão cadastradas "
+                f"e foram excluídas do painel: {credores_texto}{sufixo}. "
+                f"Cadastre-as em Carteiras por Supervisor para incluí-las nas métricas.",
+            )
+
     except Exception as e:
         messages.error(request, f"Erro ao atualizar relatório geral: {e}")
 
@@ -966,6 +1000,7 @@ def acompanhamento_geral_view(request):
         "supervisores": dados["supervisores"],
         "operadores": dados["operadores"],
         "operador_carteira": dados["operador_carteira"],
+        "fora_do_padrao": dados["fora_do_padrao"],
     }
 
     return render(request, "painel_operacao/acompanhamento_geral.html", context)
@@ -1026,6 +1061,7 @@ def exportar_acompanhamento_geral_view(request):
         for item in dados["supervisores"]
     ])
 
+    dias_faltantes = resumo.get("dias_faltantes", 0)
     df_operadores = pd.DataFrame([
         {
             "Operador": item["operador"],
@@ -1036,10 +1072,14 @@ def exportar_acompanhamento_geral_view(request):
             "Pago": float(item["pago"]),
             "A Vencer": float(item["avencer"]),
             "Quebra": float(item["quebra"]),
+            "% Quebra": float(item.get("pct_quebra", 0)),
+            "Projeção Emissão": float(item.get("projecao_emissao", 0)),
+            "Meta do Dia": float(item.get("meta_do_dia", 0)),
             "Faltante": float(item["faltante"]),
             "Excedente": float(item["excedente"]),
             "% Meta": float(item["pct_meta"]),
             "Qtd Registros": item["qtd"],
+            "Dias Faltantes": dias_faltantes,
         }
         for item in dados["operadores"]
     ])
@@ -1056,6 +1096,9 @@ def exportar_acompanhamento_geral_view(request):
             "Pago": float(item["pago"]),
             "A Vencer": float(item["avencer"]),
             "Quebra": float(item["quebra"]),
+            "% Quebra": float(item["pct_quebra"]),
+            "Projeção Emissão": float(item["projecao_emissao"]),
+            "Meta do Dia": float(item["meta_do_dia"]),
             "Faltante": float(item["faltante"]),
             "Excedente": float(item["excedente"]),
             "% Meta": float(item["pct_meta"]),
@@ -1077,6 +1120,19 @@ def exportar_acompanhamento_geral_view(request):
             "Ativo": meta.ativo,
         }
         for meta in dados["metas"]
+    ])
+
+    df_fora_padrao = pd.DataFrame([
+        {
+            "Credor ID": item["cre_id"],
+            "Carteira": item["credor"],
+            "Emissão": float(item["emissao"]),
+            "Pago": float(item["pago"]),
+            "A Vencer": float(item["avencer"]),
+            "Quebra": float(item["quebra"]),
+            "Qtd Registros": item["qtd"],
+        }
+        for item in dados["fora_do_padrao"]
     ])
 
     registros_detalhados = []
@@ -1136,6 +1192,7 @@ def exportar_acompanhamento_geral_view(request):
         "Operador Carteira": df_operador_carteira,
         "Metas": df_metas,
         "Detalhado": df_detalhado,
+        "Fora do Padrão": df_fora_padrao,
     }
 
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
@@ -1153,6 +1210,7 @@ def exportar_acompanhamento_geral_view(request):
             "Meta", "Meta Geral", "Meta Mensal", "Faltante", "Faltante para Meta", "Excedente",
             "Emissão", "Pago", "A Vencer", "Quebra", "Principal Líquido", "Multa Líquida",
             "Juros Líquido", "Valor Parcela", "Honorário Líquido", "Vlr. Total Acordo",
+            "Projeção Emissão", "Meta do Dia",
         }
         colunas_percentual = {"% Meta", "% Pago", "% A Vencer", "% Quebra"}
         colunas_data = {"Data Inicial", "Data Final", "Data Referência"}

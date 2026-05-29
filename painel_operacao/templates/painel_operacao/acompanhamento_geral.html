@@ -38,6 +38,54 @@
         </div>
     {% endif %}
 
+    {% if fora_do_padrao %}
+    <div class="acomp-alerta-fora-padrao">
+        <div class="alerta-fora-header">
+            <span class="alerta-fora-icone">⚠</span>
+            <strong>{{ fora_do_padrao|length }} carteira(s) fora do padrão — não somam nas métricas do painel</strong>
+            <button class="btn btn-sm btn-outline-warning ms-auto alerta-toggle-btn" type="button"
+                    data-bs-toggle="collapse" data-bs-target="#alertaForaPadrao">
+                Ver detalhes
+            </button>
+        </div>
+        <div class="collapse" id="alertaForaPadrao">
+            <p class="alerta-fora-desc">
+                Estas carteiras aparecem nos dados sincronizados mas <strong>não estão cadastradas</strong>
+                em <em>Carteiras por Supervisor</em>. Verifique se são erros ou dados que precisam ser cadastrados.
+                Enquanto não cadastradas, não entram em metas, emissão ou qualquer cálculo do painel.
+            </p>
+            <div class="tabela-scroll">
+                <table class="acomp-tabela tabela-alerta">
+                    <thead>
+                        <tr>
+                            <th>Credor ID</th>
+                            <th>Carteira</th>
+                            <th>Emissão</th>
+                            <th>Pago</th>
+                            <th>A Vencer</th>
+                            <th>Quebra</th>
+                            <th>Qtd</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in fora_do_padrao %}
+                        <tr>
+                            <td>{{ item.cre_id }}</td>
+                            <td>{{ item.credor }}</td>
+                            <td>{{ item.emissao|brl }}</td>
+                            <td class="texto-pago">{{ item.pago|brl }}</td>
+                            <td class="texto-avencer">{{ item.avencer|brl }}</td>
+                            <td class="texto-quebra">{{ item.quebra|brl }}</td>
+                            <td>{{ item.qtd }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
     <div class="acomp-card acomp-filtros glass-card">
         <form method="get" class="row g-3">
             <div class="col-md-2">
@@ -87,7 +135,7 @@
         <div class="acomp-kpi kpi-meta">
             <span>Meta Geral</span>
             <strong>{{ resumo.meta_geral|brl }}</strong>
-            <small>{{ resumo.qtd_metas }} meta(s) cadastrada(s) para {{ resumo.mes_meta|stringformat:"02d" }}/{{ resumo.ano_meta }}</small>
+            <small>{{ resumo.qtd_metas }} meta(s) para {{ resumo.mes_meta|stringformat:"02d" }}/{{ resumo.ano_meta }}</small>
         </div>
 
         <div class="acomp-kpi kpi-faltante">
@@ -117,126 +165,133 @@
             <strong>{{ resumo.quebra|brl }}</strong>
             <small>{{ resumo.pct_quebra|floatformat:2 }}% da composição</small>
         </div>
+
+        <div class="acomp-kpi kpi-dias">
+            <span>Dias Faltantes</span>
+            <strong>{{ resumo.dias_faltantes }}</strong>
+            <small>de {{ resumo.dias_uteis_mes }} dias úteis no mês</small>
+        </div>
     </div>
 
-    <div class="acomp-layout">
-        <section class="acomp-card acomp-operadores glass-card">
-            <div class="acomp-card-topo">
-                <div>
-                    <h3>Operadores</h3>
-                    <p>Ranking por Pago Geral, com emissão, quebra, a vencer e meta individual.</p>
-                </div>
+    <!-- Tabela de Operadores — largura total -->
+    <section class="acomp-card acomp-operadores glass-card" style="margin-bottom: 20px;">
+        <div class="acomp-card-topo">
+            <div>
+                <h3>Operadores</h3>
+                <p>Ranking por Pago Geral, com emissão, quebra, a vencer, meta e projeções. Dias faltantes: <strong>{{ resumo.dias_faltantes }}</strong></p>
             </div>
+        </div>
 
-            <div class="tabela-scroll">
-                <table class="acomp-tabela">
-                    <thead>
+        <div class="tabela-scroll">
+            <table class="acomp-tabela">
+                <thead>
+                    <tr>
+                        <th>Operador</th>
+                        <th>Supervisor</th>
+                        <th>Meta</th>
+                        <th>Emissão</th>
+                        <th>Pago</th>
+                        <th>A Vencer</th>
+                        <th>Quebra</th>
+                        <th>% Quebra</th>
+                        <th>Projeção Emissão</th>
+                        <th>Meta do Dia</th>
+                        <th>% Meta</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in operadores %}
                         <tr>
-                            <th>Operador</th>
-                            <th>Supervisor</th>
-                            <th>Meta</th>
-                            <th>Emissão</th>
-                            <th>Pago</th>
-                            <th>A vencer</th>
-                            <th>Quebra</th>
-                            <th>% Meta</th>
+                            <td>
+                                <strong>{{ item.operador }}</strong>
+                                {% if item.login %}<small>{{ item.login }}</small>{% endif %}
+                            </td>
+                            <td>{{ item.supervisor }}</td>
+                            <td>{{ item.meta|brl }}</td>
+                            <td>{{ item.emissao|brl }}</td>
+                            <td class="texto-pago">{{ item.pago|brl }}</td>
+                            <td class="texto-avencer">{{ item.avencer|brl }}</td>
+                            <td class="texto-quebra">{{ item.quebra|brl }}</td>
+                            <td class="texto-quebra">{{ item.pct_quebra|floatformat:1 }}%</td>
+                            <td>{{ item.projecao_emissao|brl }}</td>
+                            <td class="meta-dia-destaque">{{ item.meta_do_dia|brl }}</td>
+                            <td>
+                                <div class="mini-progresso {{ item.classe_meta }}">
+                                    <div style="width: {{ item.pct_meta_css }}%;"></div>
+                                </div>
+                                <span class="percentual-texto">{{ item.pct_meta|floatformat:2 }}%</span>
+                            </td>
                         </tr>
-                    </thead>
-                    <tbody>
-                        {% for item in operadores %}
-                            <tr>
-                                <td>
-                                    <strong>{{ item.operador }}</strong>
-                                    {% if item.login %}<small>{{ item.login }}</small>{% endif %}
-                                </td>
-                                <td>{{ item.supervisor }}</td>
-                                <td>{{ item.meta|brl }}</td>
-                                <td>{{ item.emissao|brl }}</td>
-                                <td class="texto-pago">{{ item.pago|brl }}</td>
-                                <td class="texto-avencer">{{ item.avencer|brl }}</td>
-                                <td class="texto-quebra">{{ item.quebra|brl }}</td>
-                                <td>
-                                    <div class="mini-progresso {{ item.classe_meta }}">
-                                        <div style="width: {{ item.pct_meta_css }}%;"></div>
-                                    </div>
-                                    <span class="percentual-texto">{{ item.pct_meta|floatformat:2 }}%</span>
-                                </td>
-                            </tr>
-                        {% empty %}
-                            <tr>
-                                <td colspan="8" class="sem-dados">Nenhum dado encontrado para os filtros.</td>
-                            </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </section>
+                    {% empty %}
+                        <tr>
+                            <td colspan="11" class="sem-dados">Nenhum dado encontrado para os filtros.</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
 
-        <aside class="acomp-lateral">
-            <div class="acomp-card piramide-card glass-card {{ resumo.classe_meta_geral }}">
-                <h3>Pirâmide da Meta</h3>
-                <p>O nível sobe conforme o Pago Geral avança contra a Meta Geral.</p>
+    <!-- Pirâmide da Meta + Desempenho Geral lado a lado -->
+    <div class="acomp-meta-visual">
+        <div class="acomp-card piramide-card glass-card {{ resumo.classe_meta_geral }}">
+            <h3>Pirâmide da Meta</h3>
+            <p>O nível sobe conforme o Pago Geral avança contra a Meta Geral.</p>
 
-                <div class="piramide-meta {% if resumo.excedente_geral > 0 %}piramide-estourou{% endif %}">
-                    <div class="piramide-linha linha-100 {% if resumo.pct_meta_geral >= 100 %}ativa{% endif %}">
-                        <span>100%</span>
-                    </div>
-
-                    <div class="piramide-linha linha-90 {% if resumo.pct_meta_geral >= 90 %}ativa{% endif %}">
-                        <span>90%</span>
-                    </div>
-
-                    <div class="piramide-linha linha-70 {% if resumo.pct_meta_geral >= 70 %}ativa{% endif %}">
-                        <span>70%</span>
-                    </div>
-
-                    <div class="piramide-linha linha-50 {% if resumo.pct_meta_geral >= 50 %}ativa{% endif %}">
-                        <span>50%</span>
-                    </div>
-
-                    <div class="piramide-linha linha-30 {% if resumo.pct_meta_geral >= 30 %}ativa{% endif %}">
-                        <span>30%</span>
-                    </div>
-
-                    <div class="piramide-linha linha-10 {% if resumo.pct_meta_geral >= 10 %}ativa{% endif %}">
-                        <span>10%</span>
-                    </div>
+            <div class="piramide-meta {% if resumo.excedente_geral > 0 %}piramide-estourou{% endif %}">
+                <div class="piramide-linha linha-100 {% if resumo.pct_meta_geral >= 100 %}ativa{% endif %}">
+                    <span>100%</span>
                 </div>
-
-                <div class="piramide-percentual">
-                    {{ resumo.pct_meta_geral|floatformat:2 }}%
+                <div class="piramide-linha linha-90 {% if resumo.pct_meta_geral >= 90 %}ativa{% endif %}">
+                    <span>90%</span>
                 </div>
-
-                {% if resumo.excedente_geral > 0 %}
-                    <div class="piramide-excedente">
-                        Meta batida! Excedente: {{ resumo.excedente_geral|brl }}
-                    </div>
-                {% endif %}
-            </div>
-
-            <div class="acomp-card desempenho-card glass-card">
-                <h3>Desempenho Geral</h3>
-
-                <div class="status-barra">
-                    <div class="status-parte status-pago" style="width: {{ resumo.pct_pago_css }}%;">
-                        Pago {{ resumo.pct_pago|floatformat:1 }}%
-                    </div>
-                    <div class="status-parte status-avencer" style="width: {{ resumo.pct_avencer_css }}%;">
-                        A vencer {{ resumo.pct_avencer|floatformat:1 }}%
-                    </div>
-                    <div class="status-parte status-quebra" style="width: {{ resumo.pct_quebra_css }}%;">
-                        Quebra {{ resumo.pct_quebra|floatformat:1 }}%
-                    </div>
+                <div class="piramide-linha linha-70 {% if resumo.pct_meta_geral >= 70 %}ativa{% endif %}">
+                    <span>70%</span>
                 </div>
-
-                <div class="desempenho-lista">
-                    <div><span>Emissão Geral</span><strong>{{ resumo.emissao|brl }}</strong></div>
-                    <div><span>Pago Geral</span><strong class="texto-pago">{{ resumo.pago|brl }}</strong></div>
-                    <div><span>A Vencer Geral</span><strong class="texto-avencer">{{ resumo.avencer|brl }}</strong></div>
-                    <div><span>Quebra Geral</span><strong class="texto-quebra">{{ resumo.quebra|brl }}</strong></div>
+                <div class="piramide-linha linha-50 {% if resumo.pct_meta_geral >= 50 %}ativa{% endif %}">
+                    <span>50%</span>
+                </div>
+                <div class="piramide-linha linha-30 {% if resumo.pct_meta_geral >= 30 %}ativa{% endif %}">
+                    <span>30%</span>
+                </div>
+                <div class="piramide-linha linha-10 {% if resumo.pct_meta_geral >= 10 %}ativa{% endif %}">
+                    <span>10%</span>
                 </div>
             </div>
-        </aside>
+
+            <div class="piramide-percentual">
+                {{ resumo.pct_meta_geral|floatformat:2 }}%
+            </div>
+
+            {% if resumo.excedente_geral > 0 %}
+                <div class="piramide-excedente">
+                    Meta batida! Excedente: {{ resumo.excedente_geral|brl }}
+                </div>
+            {% endif %}
+        </div>
+
+        <div class="acomp-card desempenho-card glass-card">
+            <h3>Desempenho Geral</h3>
+
+            <div class="status-barra">
+                <div class="status-parte status-pago" style="width: {{ resumo.pct_pago_css }}%;">
+                    Pago {{ resumo.pct_pago|floatformat:1 }}%
+                </div>
+                <div class="status-parte status-avencer" style="width: {{ resumo.pct_avencer_css }}%;">
+                    A vencer {{ resumo.pct_avencer|floatformat:1 }}%
+                </div>
+                <div class="status-parte status-quebra" style="width: {{ resumo.pct_quebra_css }}%;">
+                    Quebra {{ resumo.pct_quebra|floatformat:1 }}%
+                </div>
+            </div>
+
+            <div class="desempenho-lista">
+                <div><span>Emissão Geral</span><strong>{{ resumo.emissao|brl }}</strong></div>
+                <div><span>Pago Geral</span><strong class="texto-pago">{{ resumo.pago|brl }}</strong></div>
+                <div><span>A Vencer Geral</span><strong class="texto-avencer">{{ resumo.avencer|brl }}</strong></div>
+                <div><span>Quebra Geral</span><strong class="texto-quebra">{{ resumo.quebra|brl }}</strong></div>
+            </div>
+        </div>
     </div>
 
     <div class="acomp-grid-baixo">
@@ -276,11 +331,11 @@
             <div class="acomp-card-topo">
                 <div>
                     <h3>Operador por Carteira</h3>
-                    <p>Visão detalhada da meta por vínculo individual.</p>
+                    <p>Visão detalhada da meta por vínculo individual. Dias faltantes: <strong>{{ resumo.dias_faltantes }}</strong></p>
                 </div>
             </div>
 
-            <div class="tabela-scroll tabela-menor">
+            <div class="tabela-scroll">
                 <table class="acomp-tabela">
                     <thead>
                         <tr>
@@ -288,9 +343,14 @@
                             <th>Carteira</th>
                             <th>Supervisor</th>
                             <th>Meta</th>
+                            <th>Emissão</th>
                             <th>Pago</th>
-                            <th>Faltante</th>
-                            <th>%</th>
+                            <th>A Vencer</th>
+                            <th>Quebra</th>
+                            <th>% Quebra</th>
+                            <th>Projeção Emissão</th>
+                            <th>Meta do Dia</th>
+                            <th>% Meta</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -300,13 +360,23 @@
                                 <td>{{ item.credor }} {% if item.cre_id %}<small>{{ item.cre_id }}</small>{% endif %}</td>
                                 <td>{{ item.supervisor }}</td>
                                 <td>{{ item.meta|brl }}</td>
+                                <td>{{ item.emissao|brl }}</td>
                                 <td class="texto-pago">{{ item.pago|brl }}</td>
-                                <td>{{ item.faltante|brl }}</td>
-                                <td>{{ item.pct_meta|floatformat:2 }}%</td>
+                                <td class="texto-avencer">{{ item.avencer|brl }}</td>
+                                <td class="texto-quebra">{{ item.quebra|brl }}</td>
+                                <td class="texto-quebra">{{ item.pct_quebra|floatformat:1 }}%</td>
+                                <td>{{ item.projecao_emissao|brl }}</td>
+                                <td class="meta-dia-destaque">{{ item.meta_do_dia|brl }}</td>
+                                <td>
+                                    <div class="mini-progresso {{ item.classe_meta }}">
+                                        <div style="width: {{ item.pct_meta_css }}%;"></div>
+                                    </div>
+                                    <span class="percentual-texto">{{ item.pct_meta|floatformat:2 }}%</span>
+                                </td>
                             </tr>
                         {% empty %}
                             <tr>
-                                <td colspan="7" class="sem-dados">Nenhum vínculo de operador/carteira encontrado.</td>
+                                <td colspan="12" class="sem-dados">Nenhum vínculo de operador/carteira encontrado.</td>
                             </tr>
                         {% endfor %}
                     </tbody>

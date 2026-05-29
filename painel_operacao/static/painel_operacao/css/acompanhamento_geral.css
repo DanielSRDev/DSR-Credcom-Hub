@@ -135,7 +135,7 @@
 
 .acomp-grid-kpis {
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(6, minmax(0, 1fr));
     gap: 18px;
     margin-bottom: 22px;
 }
@@ -176,10 +176,13 @@
 .acomp-kpi strong {
     margin-top: 14px;
     color: var(--text);
-    font-size: 29px;
+    font-size: clamp(17px, 1.55vw, 24px);
     font-weight: 900;
     line-height: 1.1;
-    letter-spacing: -0.03em;
+    letter-spacing: -0.02em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .acomp-kpi small {
@@ -196,6 +199,59 @@
 .kpi-pago { background: linear-gradient(135deg, #f1fdf5 0%, #dcfce7 55%, #bbf7d0 100%); }
 .kpi-avencer { background: linear-gradient(135deg, #fff8ef 0%, #ffedd5 55%, #fed7aa 100%); }
 .kpi-quebra { background: linear-gradient(135deg, #fff4f4 0%, #fee2e2 55%, #fecaca 100%); }
+.kpi-dias { background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 55%, #bae6fd 100%); }
+
+/* Destaque para a coluna Meta do Dia na tabela de operadores */
+.meta-dia-destaque {
+    font-weight: 800;
+    color: var(--blue);
+}
+
+/* Seção de alertas — carteiras fora do padrão */
+.acomp-alerta-fora-padrao {
+    position: relative;
+    z-index: 1;
+    background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+    border: 1.5px solid #f59e0b;
+    border-radius: var(--radius-md);
+    padding: 14px 18px;
+    margin-bottom: 20px;
+}
+
+.alerta-fora-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.alerta-fora-icone {
+    font-size: 20px;
+    line-height: 1;
+}
+
+.alerta-fora-header strong {
+    font-size: 14px;
+    color: #92400e;
+}
+
+.alerta-fora-desc {
+    margin: 12px 0 10px;
+    font-size: 13px;
+    color: #78350f;
+    line-height: 1.6;
+}
+
+.tabela-alerta {
+    margin-top: 6px;
+}
+
+.alerta-toggle-btn {
+    border-color: #f59e0b;
+    color: #92400e;
+    font-weight: 700;
+    font-size: 12px;
+}
 
 .acomp-layout {
     position: relative;
@@ -508,6 +564,16 @@
     color: var(--text);
 }
 
+/* Pirâmide + Desempenho lado a lado, abaixo da tabela de operadores */
+.acomp-meta-visual {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-bottom: 20px;
+}
+
 .acomp-grid-baixo {
     position: relative;
     z-index: 1;
@@ -611,15 +677,10 @@
     .acomp-grid-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
-@media (max-width: 1180px) {
-    .acomp-layout { grid-template-columns: 1fr; }
-    .acomp-lateral { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
-
 @media (max-width: 900px) {
     .acomp-wrap { padding: 18px; }
     .acomp-grid-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .acomp-lateral { grid-template-columns: 1fr; }
+    .acomp-meta-visual { grid-template-columns: 1fr; }
     .supervisor-grid { grid-template-columns: 1fr; }
 }
 

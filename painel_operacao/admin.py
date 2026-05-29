@@ -72,6 +72,15 @@ class PainelConfiguracaoAdmin(admin.ModelAdmin):
     list_display = (
         "meta_mensal_geral",
         "meta_diaria_geral",
+        "dias_uteis_mes",
+        "intervalo_horas_sync",
+        "ativo",
+        "ultima_atualizacao",
+    )
+    fields = (
+        "meta_mensal_geral",
+        "meta_diaria_geral",
+        "dias_uteis_mes",
         "intervalo_horas_sync",
         "ativo",
         "ultima_atualizacao",

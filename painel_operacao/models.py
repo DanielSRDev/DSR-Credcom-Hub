@@ -108,6 +108,11 @@ class PainelConfiguracao(models.Model):
     meta_mensal_geral = models.DecimalField("Meta mensal geral", max_digits=14, decimal_places=2, default=0)
     meta_diaria_geral = models.DecimalField("Meta diária geral", max_digits=14, decimal_places=2, default=0)
     intervalo_horas_sync = models.PositiveIntegerField("Intervalo sync (horas)", default=3)
+    dias_uteis_mes = models.PositiveSmallIntegerField(
+        "Dias úteis do mês vigente",
+        default=22,
+        help_text="Informe a quantidade de dias úteis do mês atual. O sistema calcula os dias faltantes automaticamente.",
+    )
     ativo = models.BooleanField("Ativo", default=True)
     ultima_atualizacao = models.DateTimeField("Última atualização", null=True, blank=True)
 
