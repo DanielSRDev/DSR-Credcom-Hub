@@ -208,6 +208,7 @@ class PainelOperacaoRegistro(models.Model):
 
     despesas = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     despesa_liquida = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    taxa_liquida = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     subtotal_bruto = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     desconto_total = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     valor_total_liquido = models.DecimalField(max_digits=14, decimal_places=2, default=0)
@@ -282,6 +283,8 @@ class PainelOperacaoRelatorioGeral(models.Model):
     valor_parcela = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     valor_total_acordo = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     despesa_liquida = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    taxa_liquida = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    valor_entrada = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     valor_pagamento_periodo = models.DecimalField(max_digits=14, decimal_places=2, default=0)
 
     qtd_parcelas_acordo = models.IntegerField(default=0)

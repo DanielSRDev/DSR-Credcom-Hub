@@ -54,6 +54,7 @@ base_acordo AS (
         a.aco_status,
         a.aco_tipo,
         a.aco_etl_alteracao,
+        ISNULL(a.aco_taxa, 0) AS taxa_liquida,
 
         COALESCE(pss.pes_nome, pss_nv.pes_nome) AS pes_nome,
         COALESCE(pss.pes_cpfcnpj, pss_nv.pes_cpfcnpj) AS pes_cpfcnpj,
@@ -132,6 +133,7 @@ SELECT
     b.aco_ho - ISNULL(b.aco_desc_ho, 0) AS honorario_liquido,
     ISNULL(b.aco_despesas, 0) AS despesas,
     ISNULL(b.despesa_liquida, 0) AS despesa_liquida,
+    ISNULL(b.taxa_liquida, 0) AS taxa_liquida,
     b.aco_sub_total AS subtotal_bruto,
     ISNULL(b.aco_desc_total, 0) AS desconto_total,
     b.aco_total AS valor_total_liquido,
@@ -185,6 +187,7 @@ GROUP BY
     b.con_obs,
     b.con_id,
     b.despesa_liquida,
+    b.taxa_liquida,
     cr.cre_id,
     cr.cre_sigla,
     cf.fil_codigo,
@@ -268,6 +271,7 @@ base_acordo AS (
         a.aco_data,
         a.aco_ho,
         ISNULL(a.aco_desc_ho, 0) AS desconto_honorario,
+        ISNULL(a.aco_taxa, 0) AS taxa_liquida,
         a.aco_num_parc,
         a.aco_status,
         a.aco_tipo,
@@ -333,6 +337,7 @@ SELECT
     b.aco_ho AS honorario_bruto,
     b.desconto_honorario AS desconto_honorario,
     b.aco_ho - b.desconto_honorario AS honorario_liquido,
+    b.taxa_liquida AS taxa_liquida,
     b.aco_num_parc AS qtd_parcelas_acordo,
     ast.aco_status_descricao AS status_acordo,
     b.aco_tipo AS tipo_acordo,
@@ -470,6 +475,8 @@ base_acordo AS (
 
         a.aco_ho,
         ISNULL(a.aco_desc_ho, 0) AS desconto_honorario,
+        ISNULL(a.aco_taxa, 0) AS taxa_liquida,
+        ISNULL(a.aco_entrada, 0) AS valor_entrada,
 
         a.aco_num_parc,
         a.aco_status,
@@ -557,6 +564,8 @@ SELECT
     b.desconto_honorario AS desconto_honorario,
     b.aco_ho - b.desconto_honorario AS honorario_liquido,
     ISNULL(b.despesa_liquida, 0) AS despesa_liquida,
+    ISNULL(b.taxa_liquida, 0) AS taxa_liquida,
+    ISNULL(b.valor_entrada, 0) AS valor_entrada,
 
     b.aco_num_parc AS qtd_parcelas_acordo,
     ast.aco_status_descricao AS status_acordo,

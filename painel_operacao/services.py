@@ -290,6 +290,7 @@ def criar_registros_locais(registros_acordo, aco_ids_pagos):
 
                 despesas=decimal_or_zero(item.get("despesas")),
                 despesa_liquida=decimal_or_zero(item.get("despesa_liquida")),
+                taxa_liquida=decimal_or_zero(item.get("taxa_liquida")),
                 subtotal_bruto=decimal_or_zero(item.get("subtotal_bruto")),
                 desconto_total=decimal_or_zero(item.get("desconto_total")),
                 valor_total_liquido=decimal_or_zero(item.get("valor_total_liquido")),
@@ -549,6 +550,8 @@ def criar_registros_relatorio_a_partir_painel(itens_painel):
                 valor_parcela=valor_parcela,
                 valor_total_acordo=valor_total_acordo,
                 despesa_liquida=decimal_or_zero(item.despesa_liquida),
+                taxa_liquida=decimal_or_zero(item.taxa_liquida),
+                valor_entrada=decimal_or_zero(item.valor_entrada),
                 valor_pagamento_periodo=Decimal("0.00"),
 
                 qtd_parcelas_acordo=item.qtd_parcelas_acordo or 0,
@@ -695,6 +698,7 @@ def criar_registros_relatorio_geral(registros_hub, registros_pagos_extra, data_b
         multa_liquida = decimal_or_zero(item.get("multa_liquida"))
         juros_liquido = decimal_or_zero(item.get("juros_liquido"))
         despesa_liquida = decimal_or_zero(item.get("despesa_liquida"))
+        taxa_liquida = decimal_or_zero(item.get("taxa_liquida"))
         valor_pagamento_periodo = decimal_or_zero(item.get("valor_pago_periodo"))
         valor_parcela, valor_total_acordo = calcular_valores_acordo_planilha(
             principal_liquido=principal_liquido,
@@ -763,6 +767,8 @@ def criar_registros_relatorio_geral(registros_hub, registros_pagos_extra, data_b
                 valor_parcela=valor_parcela,
                 valor_total_acordo=valor_total_acordo,
                 despesa_liquida=despesa_liquida,
+                taxa_liquida=taxa_liquida,
+                valor_entrada=decimal_or_zero(item.get("valor_entrada")),
                 valor_pagamento_periodo=valor_pagamento_periodo,
 
                 qtd_parcelas_acordo=item.get("qtd_parcelas_acordo") or 0,
