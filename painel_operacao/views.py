@@ -731,6 +731,7 @@ def exportar_relatorio_geral_view(request):
             "juros_liquido",
             "valor_parcela",
             "honorario_liquido",
+            "despesas",
             "despesa_liquida",
             "taxa_liquida",
             "valor_entrada",
@@ -784,8 +785,8 @@ def exportar_relatorio_geral_view(request):
         # Garante que colunas monetárias ficam como float no df (evita Decimal virar string no Excel)
         for col_num in ["honorario_liquido", "valor_total_acordo", "valor_parcela",
                         "principal_liquido", "multa_liquida", "juros_liquido",
-                        "despesa_liquida", "taxa_liquida", "valor_pago", "valor_avencer",
-                        "valor_quebra", "valor_pagamento_periodo"]:
+                        "despesas", "despesa_liquida", "taxa_liquida", "valor_pago",
+                        "valor_avencer", "valor_quebra", "valor_pagamento_periodo"]:
             if col_num in df.columns:
                 df[col_num] = pd.to_numeric(df[col_num], errors="coerce").fillna(0)
 
@@ -799,6 +800,7 @@ def exportar_relatorio_geral_view(request):
         #     principal + multa + juros para não gerar parcela negativa em AVENCER/QUEBRA.
         taxa_liquida_col = pd.to_numeric(df.get("taxa_liquida", 0), errors="coerce").fillna(0)
         valor_entrada_col = pd.to_numeric(df.get("valor_entrada", 0), errors="coerce").fillna(0)
+        despesas_col = pd.to_numeric(df.get("despesas", 0), errors="coerce").fillna(0)
         tipo_neg_col = df.get("tipo_negociacao", pd.Series([""] * len(df), index=df.index)).fillna("")
         eh_parcelado = tipo_neg_col.str.contains(r"PARCELAMENTO|REFINANCIAMENTO", case=False, na=False)
 
@@ -816,21 +818,23 @@ def exportar_relatorio_geral_view(request):
         )
 
         # Regra 1b: PAGAMENTO_EXTRA PARCELAMENTO/REFINANCIAMENTO
-        # Não subtrai taxa_liquida: para REFINANCIAMENTO, aco_taxa = saldo refinanciado (enorme),
-        # não uma taxa administrativa. Para PARCELAMENTO, aco_taxa = 0 na maioria dos casos.
+        # Subtrai despesas (aco_despesas = taxa adm, ex: R$300).
+        # Não subtrai taxa_liquida: para REFINANCIAMENTO, aco_taxa = saldo refinanciado (enorme).
         mask_r1_parc = tem_pagamento_real & eh_parcelado
         df.loc[mask_r1_parc, "valor_parcela_exportacao"] = (
             valor_pagamento[mask_r1_parc]
             - honorario_liquido[mask_r1_parc]
+            - despesas_col[mask_r1_parc]
         )
 
         # Regra 2: HUB PARCELAMENTO/REFINANCIAMENTO (usa aco_entrada como pagamento real)
         # valor_entrada = aco_entrada = primeiro pagamento do cliente
-        # Não subtrai taxa_liquida: mesma razão da Regra 1b acima.
+        # Subtrai despesas (aco_despesas). Não subtrai taxa_liquida (mesma razão acima).
         mask_parc_refin = eh_parcelado & (valor_entrada_col > 0) & ~tem_pagamento_real
         df.loc[mask_parc_refin, "valor_parcela_exportacao"] = (
             valor_entrada_col[mask_parc_refin]
             - honorario_liquido[mask_parc_refin]
+            - despesas_col[mask_parc_refin]
         )
 
         df["observacao_contrato"] = df.get("observacao_contrato", "")

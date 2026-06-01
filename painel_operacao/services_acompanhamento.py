@@ -176,24 +176,25 @@ def calcular_meta_do_dia(projecao_emissao, emissao, dias_faltantes):
 
 def calcular_dias_faltantes(dias_uteis_mes=None, hoje=None):
     """
-    Conta dias úteis (seg-sex) do dia SEGUINTE até o fim do mês.
+    Dias úteis faltantes = dias_uteis_mes (config) - dias úteis já decorridos no mês (incluindo hoje).
 
-    Não inclui hoje: o dia atual já está em andamento e não entra no
-    denominador da Meta do Dia. O parâmetro dias_uteis_mes não é usado
-    no cálculo — é mantido apenas para exibição no KPI.
+    Usa o total configurado pelo usuário, não o calendário real do mês.
+    Exemplo: dias_uteis_mes=20, hoje=01/jun (segunda) → já_passados=1 → faltantes=19.
     """
-    import calendar as _cal
     if hoje is None:
         hoje = date.today()
-    ultimo = _cal.monthrange(hoje.year, hoje.month)[1]
-    fim_mes = date(hoje.year, hoje.month, ultimo)
-    dia = hoje + timedelta(days=1)
-    faltantes = 0
-    while dia <= fim_mes:
-        if dia.weekday() < 5:
-            faltantes += 1
+    if not dias_uteis_mes:
+        dias_uteis_mes = 22
+
+    inicio_mes = date(hoje.year, hoje.month, 1)
+    dia = inicio_mes
+    ja_passados = 0
+    while dia <= hoje:
+        if dia.weekday() < 5:   # seg=0 … sex=4
+            ja_passados += 1
         dia += timedelta(days=1)
-    return faltantes
+
+    return max(0, dias_uteis_mes - ja_passados)
 
 
 def preparar_metricas_com_meta(item, meta, dias_faltantes=0):

@@ -477,6 +477,7 @@ base_acordo AS (
         ISNULL(a.aco_desc_ho, 0) AS desconto_honorario,
         ISNULL(a.aco_taxa, 0) AS taxa_liquida,
         ISNULL(a.aco_entrada, 0) AS valor_entrada,
+        ISNULL(a.aco_despesas, 0) AS despesas,
 
         a.aco_num_parc,
         a.aco_status,
@@ -566,6 +567,7 @@ SELECT
     ISNULL(b.despesa_liquida, 0) AS despesa_liquida,
     ISNULL(b.taxa_liquida, 0) AS taxa_liquida,
     ISNULL(b.valor_entrada, 0) AS valor_entrada,
+    ISNULL(b.despesas, 0) AS despesas,
 
     b.aco_num_parc AS qtd_parcelas_acordo,
     ast.aco_status_descricao AS status_acordo,

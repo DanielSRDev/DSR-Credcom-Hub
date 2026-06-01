@@ -549,6 +549,7 @@ def criar_registros_relatorio_a_partir_painel(itens_painel):
                 juros_liquido=juros_liquido,
                 valor_parcela=valor_parcela,
                 valor_total_acordo=valor_total_acordo,
+                despesas=decimal_or_zero(item.despesas),
                 despesa_liquida=decimal_or_zero(item.despesa_liquida),
                 taxa_liquida=decimal_or_zero(item.taxa_liquida),
                 valor_entrada=decimal_or_zero(item.valor_entrada),
@@ -697,6 +698,7 @@ def criar_registros_relatorio_geral(registros_hub, registros_pagos_extra, data_b
         principal_liquido = decimal_or_zero(item.get("principal_liquido"))
         multa_liquida = decimal_or_zero(item.get("multa_liquida"))
         juros_liquido = decimal_or_zero(item.get("juros_liquido"))
+        despesas = decimal_or_zero(item.get("despesas"))
         despesa_liquida = decimal_or_zero(item.get("despesa_liquida"))
         taxa_liquida = decimal_or_zero(item.get("taxa_liquida"))
         valor_pagamento_periodo = decimal_or_zero(item.get("valor_pago_periodo"))
@@ -766,6 +768,7 @@ def criar_registros_relatorio_geral(registros_hub, registros_pagos_extra, data_b
                 juros_liquido=juros_liquido,
                 valor_parcela=valor_parcela,
                 valor_total_acordo=valor_total_acordo,
+                despesas=despesas,
                 despesa_liquida=despesa_liquida,
                 taxa_liquida=taxa_liquida,
                 valor_entrada=decimal_or_zero(item.get("valor_entrada")),

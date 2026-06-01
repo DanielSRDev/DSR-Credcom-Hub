@@ -282,6 +282,7 @@ class PainelOperacaoRelatorioGeral(models.Model):
     juros_liquido = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     valor_parcela = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     valor_total_acordo = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    despesas = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     despesa_liquida = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     taxa_liquida = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     valor_entrada = models.DecimalField(max_digits=14, decimal_places=2, default=0)
