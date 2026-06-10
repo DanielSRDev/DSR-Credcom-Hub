@@ -146,6 +146,48 @@
     </div>
   </div>
 
+  <!-- Modal: Mensagem em massa -->
+  <div class="modal fade" id="chatBroadcastModal" tabindex="-1" aria-labelledby="chatBroadcastModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="chatBroadcastModalLabel">📢 Mensagem em massa</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Destinatários</label>
+            <div class="mb-2">
+              <label class="d-flex align-items-center gap-2" style="cursor:pointer;">
+                <input type="checkbox" id="chatBroadcastSelectAll" onchange="
+                  document.querySelectorAll('.chat-broadcast-cb').forEach(cb => cb.checked = this.checked);
+                ">
+                <span class="fw-semibold">Selecionar todos</span>
+              </label>
+            </div>
+            <div id="chatBroadcastUserList"
+                 style="max-height:260px;overflow:auto;border:1px solid #dee2e6;border-radius:6px;">
+            </div>
+          </div>
+          <div>
+            <label for="chatBroadcastText" class="form-label fw-semibold">Mensagem</label>
+            <textarea id="chatBroadcastText"
+                      class="form-control"
+                      rows="4"
+                      placeholder="Digite o comunicado aqui..."></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button type="button" id="chatBroadcastSendBtn" class="btn btn-warning"
+                  onclick="ChatUI.sendBroadcast()">
+            Enviar para selecionados
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script>
     (function(){
       const toggle = document.getElementById('chatToggleBtn');

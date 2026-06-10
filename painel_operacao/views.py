@@ -957,28 +957,30 @@ def atualizar_view(request):
     if request.method != "POST":
         return redirect("painel_operacao:painel")
 
-    data_ini_str = request.POST.get("data_ini")
-    data_fim_str = request.POST.get("data_fim")
-
     try:
-        data_ini = date.fromisoformat(data_ini_str) if data_ini_str else date(2026, 4, 1)
-        data_fim = date.fromisoformat(data_fim_str) if data_fim_str else date.today()
+        # Lê período definido no admin (Configuração do Painel)
+        config = PainelConfiguracao.objects.filter(ativo=True).first()
+        hoje = date.today()
+        data_ini = (config.sync_data_ini if config and config.sync_data_ini else None) or date(hoje.year, hoje.month, 1)
+        data_fim = (config.sync_data_fim if config and config.sync_data_fim else None) or hoje
 
-        resultado = sincronizar_painel_operacao(
-            data_ini=data_ini,
-            data_fim=data_fim,
-        )
+        # 1. Painel (emissão)
+        resultado_painel = sincronizar_painel_operacao(data_ini=data_ini, data_fim=data_fim)
+
+        # 2. Relatório Geral (pagamentos + cruzamento)
+        resultado_relatorio = sincronizar_relatorio_geral(data_ini=data_ini, data_fim=data_fim)
 
         messages.success(
             request,
-            f"{resultado['mensagem']} | Período usado: {data_ini.strftime('%d/%m/%Y')} até {data_fim.strftime('%d/%m/%Y')}"
+            f"✅ Painel: {resultado_painel.get('mensagem', 'OK')} | "
+            f"📊 Relatório: {resultado_relatorio.get('mensagem', 'OK')} | "
+            f"Período: {data_ini.strftime('%d/%m/%Y')} até {data_fim.strftime('%d/%m/%Y')}"
         )
 
     except Exception as e:
-        messages.error(request, f"Erro ao atualizar painel: {e}")
+        messages.error(request, f"Erro ao atualizar dados: {e}")
 
-    url = reverse("painel_operacao:painel")
-    return redirect(f"{url}?data_ini={data_ini_str or '2026-04-01'}&data_fim={data_fim_str or date.today().isoformat()}")
+    return redirect("painel_operacao:painel")
 
 def aplicar_filtros_acompanhamento(request):
     hoje = date.today()

@@ -11,6 +11,7 @@ from .models import ChatPresence, ChatMonitorConfig, Message
 from .services import (
     allowed_contacts,
     can_send_to,
+    can_send_broadcast,
     is_online,
     ping_user,
     unread_by_contact,
@@ -115,6 +116,7 @@ def contacts(request):
     return JsonResponse({
         "items": items,
         "can_export": can_export_admin(me),
+        "can_broadcast": can_send_broadcast(me),
         "my_status": effective_status(me),
         "can_monitor": can_monitor_chat(me),
         "actor_id": actor.id,
@@ -292,6 +294,47 @@ def set_status(request):
         "ok": True,
         "status": presence.status
     })
+
+
+@login_required
+@require_POST
+def broadcast(request):
+    """Envia uma mensagem 1:1 para múltiplos destinatários de uma vez."""
+    me = request.user
+
+    if not can_send_broadcast(me):
+        return JsonResponse({"error": "Sem permissão para enviar mensagem em massa."}, status=403)
+
+    texto = (request.POST.get("texto") or "").strip()
+    user_ids_raw = request.POST.getlist("user_ids[]")
+
+    if not texto:
+        return JsonResponse({"error": "Mensagem vazia."}, status=400)
+    if not user_ids_raw:
+        return JsonResponse({"error": "Nenhum destinatário selecionado."}, status=400)
+
+    sent = 0
+    skipped = 0
+    for uid_str in user_ids_raw:
+        try:
+            uid = int(uid_str)
+        except (ValueError, TypeError):
+            skipped += 1
+            continue
+        if uid == me.id:
+            continue
+        try:
+            other = User.objects.get(id=uid, is_active=True)
+        except User.DoesNotExist:
+            skipped += 1
+            continue
+        if can_send_to(me, other):
+            send_text(me, other, texto)
+            sent += 1
+        else:
+            skipped += 1
+
+    return JsonResponse({"ok": True, "sent": sent, "skipped": skipped})
 
 
 @login_required

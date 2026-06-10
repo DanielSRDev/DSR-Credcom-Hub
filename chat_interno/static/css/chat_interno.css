@@ -297,6 +297,15 @@
   line-height: 1.4;
   opacity: 0.95;
 }
+
+/* Garantir que o modal de mensagem em massa apareça acima do chat panel */
+#chatBroadcastModal {
+  z-index: 10100;
+}
+#chatBroadcastModal + .modal-backdrop,
+.modal-backdrop {
+  z-index: 10099;
+}
 /* ============================= */
 /* FIX 4: DESTAQUE NÃO LIDOS     */
 /* ============================= */

@@ -3,7 +3,11 @@ window.ChatUI = (() => {
   let pollTimer = null;
   let unreadTimer = null;
   let canExport = false;
+  let canBroadcast = false;
   let started = false;
+
+  // Contatos disponíveis para broadcast (populado no loadContacts)
+  let broadcastContacts = [];
 
   let actorUserId = "";
   let monitorBound = false;
@@ -293,6 +297,14 @@ window.ChatUI = (() => {
     if (!list) return;
 
     canExport = !!data.can_export;
+    canBroadcast = !!data.can_broadcast;
+
+    // Mostra/oculta botão de mensagem em massa
+    const broadcastBtn = document.getElementById("chatBroadcastBtn");
+    if (broadcastBtn) broadcastBtn.style.display = canBroadcast ? "" : "none";
+
+    broadcastContacts = (data.items || []).map((u) => ({ id: u.id, nome: u.nome || u.username }));
+
     if (data.my_status) {
       myStatus = data.my_status;
       localStorage.setItem("chat_presence_status", myStatus);
@@ -816,5 +828,67 @@ window.ChatUI = (() => {
     paintStatusButtons();
   }
 
-  return { start, open, send, setStatus };
+  // ─── Mensagem em massa ────────────────────────────────────────────────────
+
+  function openBroadcastModal() {
+    const modal = document.getElementById("chatBroadcastModal");
+    if (!modal) return;
+
+    const listEl = document.getElementById("chatBroadcastUserList");
+    const selectAllEl = document.getElementById("chatBroadcastSelectAll");
+    const textEl = document.getElementById("chatBroadcastText");
+
+    if (textEl) textEl.value = "";
+    if (selectAllEl) selectAllEl.checked = false;
+
+    if (listEl) {
+      listEl.innerHTML = "";
+      broadcastContacts.forEach((u) => {
+        const label = document.createElement("label");
+        label.className = "d-flex align-items-center gap-2 py-1 px-2 border-bottom";
+        label.style.cursor = "pointer";
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.value = String(u.id);
+        cb.className = "chat-broadcast-cb";
+        const span = document.createElement("span");
+        span.textContent = u.nome;
+        label.appendChild(cb);
+        label.appendChild(span);
+        listEl.appendChild(label);
+      });
+    }
+
+    const bsModal = new bootstrap.Modal(modal);
+    bsModal.show();
+  }
+
+  async function sendBroadcast() {
+    const textEl = document.getElementById("chatBroadcastText");
+    const texto = (textEl?.value || "").trim();
+    if (!texto) { alert("Digite uma mensagem antes de enviar."); return; }
+
+    const checked = [...document.querySelectorAll(".chat-broadcast-cb:checked")];
+    if (checked.length === 0) { alert("Selecione ao menos um destinatário."); return; }
+
+    const fd = new FormData();
+    fd.append("texto", texto);
+    checked.forEach((cb) => fd.append("user_ids[]", cb.value));
+
+    const sendBtn = document.getElementById("chatBroadcastSendBtn");
+    if (sendBtn) sendBtn.disabled = true;
+
+    try {
+      const data = await apiPost("/chat/broadcast/", fd);
+      if (data?.error) { alert(data.error); return; }
+      const modal = document.getElementById("chatBroadcastModal");
+      const bsModal = bootstrap.Modal.getInstance(modal);
+      if (bsModal) bsModal.hide();
+      showInternalToast("Mensagem enviada", `Enviada para ${data.sent} pessoa(s).`);
+    } finally {
+      if (sendBtn) sendBtn.disabled = false;
+    }
+  }
+
+  return { start, open, send, setStatus, openBroadcastModal, sendBroadcast };
 })();

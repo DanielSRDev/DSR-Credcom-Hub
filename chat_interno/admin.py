@@ -11,6 +11,7 @@ from .models import (
     ChatMonitorConfig,
     ChatBloqueio,
     ChatLiberacao,
+    ChatLiberacaoGrupo,
 )
 
 User = get_user_model()
@@ -102,6 +103,7 @@ class ChatMonitorConfigInline(admin.StackedInline):
     model      = ChatMonitorConfig
     can_delete = False
     extra      = 0
+    fields     = ("monitorado", "notificar_fone", "pode_enviar_massa")
 
 
 class ChatVinculoOperadorInline(admin.TabularInline):
@@ -239,3 +241,69 @@ class ChatLiberacaoAdmin(admin.ModelAdmin):
         if obj.user_a_id and obj.user_b_id and obj.user_a_id > obj.user_b_id:
             obj.user_a_id, obj.user_b_id = obj.user_b_id, obj.user_a_id
         super().save_model(request, obj, form, change)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# ChatLiberacaoGrupo (Grupão)
+# ──────────────────────────────────────────────────────────────────────────────
+
+@admin.register(ChatLiberacaoGrupo)
+class ChatLiberacaoGrupoAdmin(admin.ModelAdmin):
+    list_display    = ("liberacao_display", "para_todos", "qtd_membros", "motivo", "criado_em")
+    search_fields   = (
+        "usuario__username", "usuario__first_name",
+        "membros__username", "membros__first_name",
+        "motivo",
+    )
+    readonly_fields     = ("criado_em",)
+    autocomplete_fields = ("usuario",)
+    filter_horizontal   = ("membros",)
+    ordering            = ("usuario__username",)
+    actions             = ["revogar_liberacao_grupo"]
+
+    @admin.action(description="🚫 Revogar liberação em grupo selecionada")
+    def revogar_liberacao_grupo(self, request, queryset):
+        total = queryset.count()
+        queryset.delete()
+        self.message_user(
+            request,
+            f"{total} liberação(ões) em grupo revogada(s).",
+            level="warning",
+        )
+
+    fieldsets = (
+        (None, {
+            "fields": ("usuario", "para_todos", "membros", "motivo"),
+            "description": (
+                "<strong>Grupão:</strong> selecione o <em>Usuário central</em> (ex: Leidiane do RH) "
+                "e depois os <em>Membros</em> que poderão conversar individualmente com ela. "
+                "Marque <em>Liberar para todos</em> para incluir todos os usuários ativos automaticamente "
+                "(nesse caso, o campo Membros é ignorado). "
+                "As conversas continuam sendo 1:1 — não é um grupo de chat."
+            ),
+        }),
+        ("Auditoria", {
+            "fields": ("criado_em",),
+            "classes": ("collapse",),
+        }),
+    )
+
+    @admin.display(description="Usuário central ↔ Membros")
+    def liberacao_display(self, obj):
+        from django.utils.html import format_html
+        usuario_nome = obj.usuario.get_full_name() or obj.usuario.username
+        if obj.para_todos:
+            detalhe = format_html("<em>Todos os usuários</em>")
+        else:
+            nomes = ", ".join(
+                m.get_full_name() or m.username
+                for m in obj.membros.all()[:5]
+            )
+            detalhe = format_html("{}", nomes or "—")
+        return format_html("<strong>{}</strong> &nbsp;↔&nbsp; {}", usuario_nome, detalhe)
+
+    @admin.display(description="Nº membros")
+    def qtd_membros(self, obj):
+        if obj.para_todos:
+            return "Todos"
+        return obj.membros.count()

@@ -162,16 +162,26 @@ def calcular_projecao_emissao(meta, pct_quebra):
     return (meta * fator + meta).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
-def calcular_meta_do_dia(projecao_emissao, emissao, dias_faltantes):
-    """Meta do dia = (projeção emissão - emissão acumulada) / dias faltantes."""
-    projecao_emissao = decimal_or_zero(projecao_emissao)
+def calcular_meta_do_dia(meta, emissao, pct_quebra, dias_faltantes):
+    """
+    Meta do dia = (meta - emissao) * (1 + %quebra / 100) / dias faltantes.
+
+    Aplica o fator de quebra sobre o RESTANTE da meta (não sobre a meta total),
+    representando quanto precisa ser emitido por dia para bater a meta levando
+    em conta o índice de quebra atual.
+    Exemplo: meta=10.000, emissao=4.619,43, quebra=32,7%, dias=15
+             → (5.380,57 * 1.327) / 15 = 476,00
+    """
+    meta = decimal_or_zero(meta)
     emissao = decimal_or_zero(emissao)
+    pct_quebra = decimal_or_zero(pct_quebra)
     if not dias_faltantes or dias_faltantes <= 0:
         return ZERO
-    diferenca = projecao_emissao - emissao
-    if diferenca <= 0:
+    restante = meta - emissao
+    if restante <= 0:
         return ZERO
-    return (diferenca / Decimal(str(dias_faltantes))).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    fator = Decimal("1") + (pct_quebra / Decimal("100"))
+    return (restante * fator / Decimal(str(dias_faltantes))).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
 def calcular_dias_faltantes(dias_uteis_mes=None, hoje=None):
@@ -213,7 +223,7 @@ def preparar_metricas_com_meta(item, meta, dias_faltantes=0):
 
     item["pct_quebra"] = calcular_pct_quebra_operador(item["quebra"], item["pago"])
     item["projecao_emissao"] = calcular_projecao_emissao(item["meta"], item["pct_quebra"])
-    item["meta_do_dia"] = calcular_meta_do_dia(item["projecao_emissao"], item["emissao"], dias_faltantes)
+    item["meta_do_dia"] = calcular_meta_do_dia(item["meta"], item["emissao"], item["pct_quebra"], dias_faltantes)
 
     return item
 

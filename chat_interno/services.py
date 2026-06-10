@@ -5,7 +5,7 @@ from django.utils import timezone
 from django.contrib.auth import get_user_model
 from django.db.models import Q, Count
 
-from .models import Conversation, Message, MessageReaction, ChatVinculoOperador, ChatPresence, ChatBloqueio, ChatLiberacao
+from .models import Conversation, Message, MessageReaction, ChatVinculoOperador, ChatPresence, ChatBloqueio, ChatLiberacao, ChatLiberacaoGrupo
 
 User = get_user_model()
 
@@ -34,13 +34,43 @@ def _ids_bloqueados(user):
 def _ids_liberados(user):
     """
     Retorna set de IDs com liberação explícita para este usuário.
+    Inclui liberações individuais (ChatLiberacao) e em grupo (ChatLiberacaoGrupo).
     Superuser não precisa — já vê todos.
     """
     if user.is_superuser:
         return set()
+
+    # liberações individuais
     como_a = ChatLiberacao.objects.filter(user_a=user).values_list("user_b_id", flat=True)
     como_b = ChatLiberacao.objects.filter(user_b=user).values_list("user_a_id", flat=True)
-    return set(como_a) | set(como_b)
+    ids = set(como_a) | set(como_b)
+
+    # grupão: o usuário É o central → todos os membros (ou todos os ativos) são liberados
+    libs_central = ChatLiberacaoGrupo.objects.filter(usuario=user)
+    if libs_central.filter(para_todos=True).exists():
+        ids |= set(User.objects.filter(is_active=True).exclude(id=user.id).values_list("id", flat=True))
+    else:
+        for lib in libs_central:
+            ids |= set(lib.membros.filter(is_active=True).exclude(id=user.id).values_list("id", flat=True))
+
+    # grupão: o usuário É membro do grupão de alguém → esse alguém é liberado
+    from django.db.models import Q as _Q
+    libs_como_membro = ChatLiberacaoGrupo.objects.filter(
+        _Q(membros=user) | _Q(para_todos=True)
+    ).exclude(usuario=user).values_list("usuario_id", flat=True)
+    ids |= set(libs_como_membro)
+
+    return ids
+
+
+def can_send_broadcast(user) -> bool:
+    """Verifica se o usuário pode enviar mensagem em massa."""
+    if not user or not user.is_authenticated:
+        return False
+    if user.is_superuser or user.is_staff:
+        return True
+    cfg = getattr(user, "chat_monitor_config", None)
+    return bool(cfg and cfg.pode_enviar_massa)
 
 
 def allowed_contacts(user):

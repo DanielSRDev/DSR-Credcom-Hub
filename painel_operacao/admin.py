@@ -74,16 +74,25 @@ class PainelConfiguracaoAdmin(admin.ModelAdmin):
         "meta_diaria_geral",
         "dias_uteis_mes",
         "intervalo_horas_sync",
+        "sync_data_ini",
+        "sync_data_fim",
         "ativo",
         "ultima_atualizacao",
     )
-    fields = (
-        "meta_mensal_geral",
-        "meta_diaria_geral",
-        "dias_uteis_mes",
-        "intervalo_horas_sync",
-        "ativo",
-        "ultima_atualizacao",
+    fieldsets = (
+        ("Metas", {
+            "fields": ("meta_mensal_geral", "meta_diaria_geral", "dias_uteis_mes"),
+        }),
+        ("Período do Sync (botão Atualizar dados)", {
+            "description": (
+                "Defina aqui o período que será usado ao clicar em 'Atualizar dados' no painel. "
+                "Deixe em branco para usar o mês atual (1º dia até hoje)."
+            ),
+            "fields": ("sync_data_ini", "sync_data_fim"),
+        }),
+        ("Sistema", {
+            "fields": ("intervalo_horas_sync", "ativo", "ultima_atualizacao"),
+        }),
     )
 
 

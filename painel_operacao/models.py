@@ -113,6 +113,18 @@ class PainelConfiguracao(models.Model):
         default=22,
         help_text="Informe a quantidade de dias úteis do mês atual. O sistema calcula os dias faltantes automaticamente.",
     )
+    sync_data_ini = models.DateField(
+        "Data inicial do sync",
+        null=True,
+        blank=True,
+        help_text="Início do período usado pelo botão 'Atualizar dados'. Deixe em branco para usar o 1º dia do mês atual.",
+    )
+    sync_data_fim = models.DateField(
+        "Data final do sync",
+        null=True,
+        blank=True,
+        help_text="Fim do período usado pelo botão 'Atualizar dados'. Deixe em branco para usar a data de hoje.",
+    )
     ativo = models.BooleanField("Ativo", default=True)
     ultima_atualizacao = models.DateTimeField("Última atualização", null=True, blank=True)
 

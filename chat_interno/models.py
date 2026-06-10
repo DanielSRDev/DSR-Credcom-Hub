@@ -96,9 +96,10 @@ class ChatPresence(models.Model):
 
 
 class ChatMonitorConfig(models.Model):
-    user           = models.OneToOneField(User, on_delete=models.CASCADE, related_name="chat_monitor_config")
-    monitorado     = models.BooleanField(default=False)
-    notificar_fone = models.CharField(max_length=20, blank=True, default="")
+    user              = models.OneToOneField(User, on_delete=models.CASCADE, related_name="chat_monitor_config")
+    monitorado        = models.BooleanField(default=False)
+    notificar_fone    = models.CharField(max_length=20, blank=True, default="")
+    pode_enviar_massa = models.BooleanField(default=False, verbose_name="Pode enviar mensagem em massa")
 
     class Meta:
         verbose_name        = "Configuração de monitor"
@@ -145,6 +146,35 @@ class ChatBloqueio(models.Model):
     def existe(cls, user1, user2) -> bool:
         a_id, b_id = sorted([user1.id, user2.id])
         return cls.objects.filter(user_a_id=a_id, user_b_id=b_id).exists()
+
+
+class ChatLiberacaoGrupo(models.Model):
+    """
+    Grupão: libera um conjunto de usuários para conversar individualmente
+    com o 'usuario' central.
+
+    - 'membros': lista de usuários que podem falar com o central.
+    - 'para_todos': se True, todos os usuários ativos podem falar com o central
+      (ignora 'membros').
+
+    Isso NÃO é um grupo de chat — as conversas continuam sendo 1:1.
+    Substitui a criação de N ChatLiberacao individuais.
+    """
+    usuario    = models.ForeignKey(User, on_delete=models.CASCADE, related_name="chat_liberacoes_grupo", verbose_name="Usuário central")
+    membros    = models.ManyToManyField(User, blank=True, related_name="chat_liberacoes_grupo_membro", verbose_name="Membros do grupão")
+    para_todos = models.BooleanField(default=False, verbose_name="Liberar para todos os usuários ativos")
+    motivo     = models.CharField(max_length=255, blank=True, verbose_name="Motivo (opcional)")
+    criado_em  = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name        = "Liberação de chat em grupo (grupão)"
+        verbose_name_plural = "Liberações de chat em grupo (grupão)"
+        ordering            = ["usuario__username"]
+
+    def __str__(self):
+        if self.para_todos:
+            return f"Grupão: {self.usuario} ↔ Todos os usuários"
+        return f"Grupão: {self.usuario} ↔ {self.membros.count()} membro(s)"
 
 
 class ChatLiberacao(models.Model):
