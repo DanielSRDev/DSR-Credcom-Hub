@@ -298,11 +298,10 @@
   opacity: 0.95;
 }
 
-/* Garantir que o modal de mensagem em massa apareça acima do chat panel */
-#chatBroadcastModal {
+/* Garantir que qualquer modal do Bootstrap apareça acima do chat panel/overlay */
+.modal {
   z-index: 10100;
 }
-#chatBroadcastModal + .modal-backdrop,
 .modal-backdrop {
   z-index: 10099;
 }
