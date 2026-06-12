@@ -75,6 +75,42 @@ def criar_perfil_usuario(sender, instance, created, **kwargs):
             )
 
 
+class AnotacaoPessoal(models.Model):
+    """
+    Bloco de notas pessoal do usuário — lembretes, acessos, recados etc.
+    Visível e editável apenas pelo próprio usuário.
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="anotacoes_pessoais",
+        verbose_name="Usuário",
+    )
+    class Cor(models.TextChoices):
+        PADRAO  = "padrao",  "Padrão"
+        AMARELO = "amarelo", "Amarelo"
+        VERDE   = "verde",   "Verde"
+        AZUL    = "azul",    "Azul"
+        ROSA    = "rosa",    "Rosa"
+        VERMELHO = "vermelho", "Vermelho"
+
+    texto = models.TextField(verbose_name="Anotação")
+    concluida = models.BooleanField(default=False, verbose_name="Concluída")
+    fixada = models.BooleanField(default=False, verbose_name="Fixada")
+    cor = models.CharField(max_length=10, choices=Cor.choices, default=Cor.PADRAO, verbose_name="Cor")
+    lembrete_em = models.DateTimeField(null=True, blank=True, verbose_name="Lembrar em")
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Anotação pessoal"
+        verbose_name_plural = "Anotações pessoais"
+        ordering = ["concluida", "-fixada", "-criado_em"]
+
+    def __str__(self):
+        return f"{self.user.username}: {self.texto[:40]}"
+
+
 class UsuarioRestricaoModulo(models.Model):
     """
     Blacklist de módulos por usuário.
@@ -95,6 +131,7 @@ class UsuarioRestricaoModulo(models.Model):
         ZAPMSG          = "zapmsg",          "ZapMsg (WhatsApp)"
         PAINEL_OPERACAO = "painel_operacao", "Painel Operação"
         CHAT            = "chat",            "Chat Interno"
+        FINANCEIRO      = "financeiro",      "Financeiro"
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,

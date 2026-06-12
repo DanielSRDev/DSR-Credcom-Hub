@@ -5,7 +5,7 @@ from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.contrib.auth.models import User
 from django.utils.html import format_html
 
-from .models import PerfilUsuario, UsuarioRestricaoModulo
+from .models import AnotacaoPessoal, PerfilUsuario, UsuarioRestricaoModulo
 
 logger = logging.getLogger("core.admin")
 
@@ -129,3 +129,11 @@ class UsuarioRestricaoModuloAdmin(admin.ModelAdmin):
             cor,
             obj.get_modulo_bloqueado_display(),
         )
+
+
+@admin.register(AnotacaoPessoal)
+class AnotacaoPessoalAdmin(admin.ModelAdmin):
+    list_display = ("user", "texto", "cor", "fixada", "concluida", "lembrete_em", "criado_em")
+    list_filter = ("concluida", "fixada", "cor")
+    search_fields = ("user__username", "texto")
+    autocomplete_fields = ("user",)

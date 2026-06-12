@@ -7,6 +7,7 @@ GRP_SUPERVISAO  = {"OPERACAO_SUPERVISOR"}
 GRP_OPERACAO    = {"OPERACAO"}
 GRP_GESTAO      = {"GESTAO", "GESTAO_GESTORA", "GESTAO_GESTOR", "GESTAO_USUARIO"}
 GRP_NIBO        = {"NIBO"}
+GRP_FINANCEIRO  = {"FINANCEIRO", "GESTAO_GESTORA"}
 
 
 def _user_in_any_group(user, group_names: set[str]) -> bool:
@@ -51,6 +52,7 @@ def nav_permissoes(request) -> Dict[str, bool]:
         "pode_ver_zapmsg":          False,
         "pode_ver_painel_operacao": False,
         "pode_ver_chat":            False,
+        "pode_ver_financeiro":      False,
         "is_coordenacao":           False,
         "is_supervisao":            False,
         "is_operador":              False,
@@ -67,6 +69,7 @@ def nav_permissoes(request) -> Dict[str, bool]:
             "pode_ver_zapmsg":          True,
             "pode_ver_painel_operacao": True,
             "pode_ver_chat":            True,
+            "pode_ver_financeiro":      True,
             "is_coordenacao":           True,
             "is_supervisao":            True,
             "is_operador":              True,
@@ -106,6 +109,11 @@ def nav_permissoes(request) -> Dict[str, bool]:
     )
     pode_ver_chat = nao_bloqueado("chat")  # qualquer autenticado pode ver chat
 
+    pode_ver_financeiro = (
+        _user_in_any_group(user, GRP_FINANCEIRO)
+        and nao_bloqueado("financeiro")
+    )
+
     return {
         "pode_ver_operacao":        pode_ver_operacao,
         "pode_ver_gestao":          pode_ver_gestao,
@@ -113,7 +121,23 @@ def nav_permissoes(request) -> Dict[str, bool]:
         "pode_ver_zapmsg":          pode_ver_zapmsg,
         "pode_ver_painel_operacao": pode_ver_painel_operacao,
         "pode_ver_chat":            pode_ver_chat,
+        "pode_ver_financeiro":      pode_ver_financeiro,
         "is_coordenacao":           is_coordenacao,
         "is_supervisao":            is_supervisao,
         "is_operador":              is_operador,
+    }
+
+
+def minhas_notas(request) -> Dict[str, object]:
+    """
+    Disponibiliza as anotações pessoais do usuário logado para o
+    modal de anotações na navbar.
+    """
+    user = getattr(request, "user", None)
+    if not user or not user.is_authenticated:
+        return {"minhas_anotacoes": []}
+
+    from core.models import AnotacaoPessoal
+    return {
+        "minhas_anotacoes": AnotacaoPessoal.objects.filter(user=user),
     }

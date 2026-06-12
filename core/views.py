@@ -1,7 +1,10 @@
 from django.contrib.auth import update_session_auth_hash
 from django.contrib.auth.decorators import login_required
-from django.shortcuts import render, redirect
+from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib import messages
+from django.views.decorators.http import require_POST
+
+from .models import AnotacaoPessoal
 
 
 @login_required
@@ -44,3 +47,82 @@ def primeiro_acesso(request):
             return redirect("ambiente")
 
     return render(request, "registration/primeiro_acesso.html", {"erro": erro})
+
+
+# ── Anotações pessoais ────────────────────────────────────────────────────────
+
+def _voltar(request):
+    next_url = request.POST.get("next") or request.META.get("HTTP_REFERER") or "ambiente"
+    return redirect(next_url)
+
+
+def _cor_do_post(request):
+    cor = request.POST.get("cor") or AnotacaoPessoal.Cor.PADRAO
+    if cor not in AnotacaoPessoal.Cor.values:
+        cor = AnotacaoPessoal.Cor.PADRAO
+    return cor
+
+
+def _lembrete_do_post(request):
+    lembrete_str = request.POST.get("lembrete_em", "").strip()
+    if not lembrete_str:
+        return None
+    from django.utils.dateparse import parse_datetime
+    from django.utils import timezone
+    lembrete_em = parse_datetime(lembrete_str)
+    if lembrete_em and timezone.is_naive(lembrete_em):
+        lembrete_em = timezone.make_aware(lembrete_em)
+    return lembrete_em
+
+
+@login_required
+@require_POST
+def anotacao_criar(request):
+    texto = request.POST.get("texto", "").strip()
+    if texto:
+        AnotacaoPessoal.objects.create(
+            user=request.user,
+            texto=texto,
+            cor=_cor_do_post(request),
+            lembrete_em=_lembrete_do_post(request),
+        )
+    return _voltar(request)
+
+
+@login_required
+@require_POST
+def anotacao_editar(request, pk):
+    nota = get_object_or_404(AnotacaoPessoal, pk=pk, user=request.user)
+    texto = request.POST.get("texto", "").strip()
+    if texto:
+        nota.texto = texto
+        nota.cor = _cor_do_post(request)
+        nota.lembrete_em = _lembrete_do_post(request)
+        nota.save(update_fields=["texto", "cor", "lembrete_em"])
+    return _voltar(request)
+
+
+@login_required
+@require_POST
+def anotacao_toggle(request, pk):
+    nota = get_object_or_404(AnotacaoPessoal, pk=pk, user=request.user)
+    nota.concluida = not nota.concluida
+    nota.save(update_fields=["concluida"])
+    return _voltar(request)
+
+
+@login_required
+@require_POST
+def anotacao_fixar(request, pk):
+    nota = get_object_or_404(AnotacaoPessoal, pk=pk, user=request.user)
+    nota.fixada = not nota.fixada
+    nota.save(update_fields=["fixada"])
+    return _voltar(request)
+
+
+@login_required
+@require_POST
+def anotacao_excluir(request, pk):
+    nota = get_object_or_404(AnotacaoPessoal, pk=pk, user=request.user)
+    nota.delete()
+    return _voltar(request)

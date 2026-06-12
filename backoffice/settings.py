@@ -48,6 +48,7 @@ INSTALLED_APPS = [
     "chat_interno",
     'zapmsg',
     "painel_operacao",
+    "financeiro",
 ]
 
 MIDDLEWARE = [
@@ -77,6 +78,7 @@ TEMPLATES = [
                 "django.contrib.messages.context_processors.messages",
                 # NOVO:
                 "core.context_processors.nav_permissoes",
+                "core.context_processors.minhas_notas",
                 "chat_interno.context_processors.chat_nav",
             ],
         },

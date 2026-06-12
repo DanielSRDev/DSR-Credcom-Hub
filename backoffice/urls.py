@@ -20,6 +20,8 @@ urlpatterns = [
     path("chat/", include(("chat_interno.urls", "chat_interno"), namespace="chat_interno")),
     path("zapmsg/", include("zapmsg.urls")),
     path("operacao/painel/", include(("painel_operacao.urls", "painel_operacao"), namespace="painel_operacao")),
+    path("core/", include(("core.urls", "core"), namespace="core")),
+    path("financeiro/", include(("financeiro.urls", "financeiro"), namespace="financeiro")),
 
 ] + static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
 

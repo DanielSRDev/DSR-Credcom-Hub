@@ -42,6 +42,7 @@ class ModuleGroupAccessMiddleware:
             "OPERACAO_SUPERVISOR",
         },
         "/chat/": set(),  # acesso livre para autenticados — sem grupo exigido
+        "/financeiro/": {"FINANCEIRO", "GESTAO_GESTORA"},
     }
 
     # Mapeamento prefixo → chave do Modulo em UsuarioRestricaoModulo
@@ -53,6 +54,7 @@ class ModuleGroupAccessMiddleware:
         "/operacao/":        "operacao",
         "/zapmsg/":          "zapmsg",
         "/chat/":            "chat",
+        "/financeiro/":      "financeiro",
     }
 
     PUBLIC_PATHS = {

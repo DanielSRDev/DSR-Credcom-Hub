@@ -423,11 +423,14 @@ def painel(request):
         credores  = form.cleaned_data.get("credores") or []
         enviado   = form.cleaned_data.get("enviado")
 
-    repasse      = listar_repasse(di, df, cli, credores, enviado)
-    repassevr    = listar_repassevr(di, df, cli, credores, enviado)
-    despesa      = listar_despesa(di, df, cli, credores, enviado)
-    contareceber = listar_contareceber(di, df, cli, credores, enviado)
-    contapagar   = listar_contapagar(di, df, cli, credores, enviado)
+    if request.GET:
+        repasse      = listar_repasse(di, df, cli, credores, enviado)
+        repassevr    = listar_repassevr(di, df, cli, credores, enviado)
+        despesa      = listar_despesa(di, df, cli, credores, enviado)
+        contareceber = listar_contareceber(di, df, cli, credores, enviado)
+        contapagar   = listar_contapagar(di, df, cli, credores, enviado)
+    else:
+        repasse = repassevr = despesa = contareceber = contapagar = []
 
     ctx = {
         "form": form,

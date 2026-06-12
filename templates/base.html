@@ -15,6 +15,13 @@
   <link rel="stylesheet" href="{% static 'css/chat_interno.css' %}">
   {% block extra_css %}{% endblock %}
   {% block extra_head %}{% endblock %}
+  <style>
+    .nota-cor-amarelo  { background: #fffbeb; border-color: #fcd34d !important; }
+    .nota-cor-verde    { background: #f0fdf4; border-color: #86efac !important; }
+    .nota-cor-azul     { background: #eff6ff; border-color: #93c5fd !important; }
+    .nota-cor-rosa     { background: #fdf2f8; border-color: #f9a8d4 !important; }
+    .nota-cor-vermelho { background: #fef2f2; border-color: #fca5a5 !important; }
+  </style>
 </head>
 <body>
 
@@ -49,6 +56,10 @@
             <a class="btn btn-light btn-sm" href="/nibo/">Nibo</a>
           {% endif %}
 
+          {% if pode_ver_financeiro %}
+            <a class="btn btn-light btn-sm" href="{% url 'financeiro:financeiro' %}">Financeiro</a>
+          {% endif %}
+
           {# Chat habilitado #}
           {% if chat_enabled|default:True %}
             <button id="chatToggleBtn" type="button" class="btn btn-warning btn-sm position-relative">
@@ -61,7 +72,9 @@
             </button>
           {% endif %}
 
-          <span class="text-white small ms-2">Olá, {{ user.username }}</span>
+          <button type="button" class="btn btn-link text-white small ms-2 p-0 border-0" data-bs-toggle="modal" data-bs-target="#anotacoesModal">
+            Olá, {{ user.username }}
+          </button>
 
           <form method="post" action="{% url 'logout' %}" class="m-0">
             {% csrf_token %}
@@ -78,6 +91,99 @@
   <main class="{% block container_class %}container-fluid px-3{% endblock %} py-3">
     {% block content %}{% endblock %}
   </main>
+
+  {% if user.is_authenticated %}
+  <!-- ANOTAÇÕES PESSOAIS -->
+  <div class="modal fade" id="anotacoesModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">📝 Minhas anotações</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <form method="post" action="{% url 'core:anotacao_criar' %}" class="mb-3 border rounded p-2">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{{ request.get_full_path }}">
+            <textarea name="texto" class="form-control mb-2" rows="2" placeholder="Lembrete, acesso, recado..." required></textarea>
+            <div class="d-flex flex-wrap gap-2 align-items-center">
+              <div>
+                <label class="form-label small mb-0 me-1">Cor</label>
+                <select name="cor" class="form-select form-select-sm d-inline-block w-auto">
+                  <option value="padrao">Padrão</option>
+                  <option value="amarelo">Amarelo</option>
+                  <option value="verde">Verde</option>
+                  <option value="azul">Azul</option>
+                  <option value="rosa">Rosa</option>
+                  <option value="vermelho">Vermelho</option>
+                </select>
+              </div>
+              <div>
+                <label class="form-label small mb-0 me-1">Lembrar em</label>
+                <input type="datetime-local" name="lembrete_em" class="form-control form-control-sm d-inline-block w-auto">
+              </div>
+              <button type="submit" class="btn btn-primary btn-sm ms-auto">Adicionar</button>
+            </div>
+          </form>
+
+          {% if minhas_anotacoes %}
+            <div class="d-flex flex-column gap-2">
+              {% for nota in minhas_anotacoes %}
+                <div class="border rounded p-2 nota-cor-{{ nota.cor }} {% if nota.concluida %}opacity-50{% endif %}">
+                  <div class="d-flex justify-content-between align-items-start gap-2">
+                    <div class="flex-grow-1 {% if nota.concluida %}text-decoration-line-through{% endif %}" style="white-space: pre-wrap;">
+                      {% if nota.fixada %}📌 {% endif %}{{ nota.texto }}
+                    </div>
+                    <div class="d-flex gap-1 flex-shrink-0">
+                      <button type="button" class="btn btn-sm btn-outline-primary" title="Editar" data-bs-toggle="collapse" data-bs-target="#editNota{{ nota.id }}">✏️</button>
+                      <form method="post" action="{% url 'core:anotacao_fixar' nota.id %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                        <button type="submit" class="btn btn-sm btn-outline-secondary" title="Fixar/Desafixar">📌</button>
+                      </form>
+                      <form method="post" action="{% url 'core:anotacao_toggle' nota.id %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                        <button type="submit" class="btn btn-sm btn-outline-success" title="Concluir/Reabrir">✔</button>
+                      </form>
+                      <form method="post" action="{% url 'core:anotacao_excluir' nota.id %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                        <button type="submit" class="btn btn-sm btn-outline-danger" title="Excluir">🗑</button>
+                      </form>
+                    </div>
+                  </div>
+                  {% if nota.lembrete_em %}
+                    <div class="small text-secondary mt-1">⏰ {{ nota.lembrete_em|date:"d/m/Y H:i" }}</div>
+                  {% endif %}
+
+                  <div class="collapse mt-2" id="editNota{{ nota.id }}">
+                    <form method="post" action="{% url 'core:anotacao_editar' nota.id %}" class="border-top pt-2">
+                      {% csrf_token %}
+                      <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                      <textarea name="texto" class="form-control form-control-sm mb-2" rows="2" required>{{ nota.texto }}</textarea>
+                      <div class="d-flex flex-wrap gap-2 align-items-center">
+                        <select name="cor" class="form-select form-select-sm d-inline-block w-auto">
+                          {% for valor, rotulo in nota.Cor.choices %}
+                            <option value="{{ valor }}" {% if valor == nota.cor %}selected{% endif %}>{{ rotulo }}</option>
+                          {% endfor %}
+                        </select>
+                        <input type="datetime-local" name="lembrete_em" class="form-control form-control-sm d-inline-block w-auto" value="{{ nota.lembrete_em|date:'Y-m-d\TH:i' }}">
+                        <button type="submit" class="btn btn-primary btn-sm ms-auto">Salvar</button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
+          {% else %}
+            <p class="text-secondary small mb-0">Nenhuma anotação ainda.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
 
 {% if user.is_authenticated and chat_enabled|default:True %}
   <!-- CHAT (painel grande) -->
