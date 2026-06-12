@@ -125,9 +125,11 @@ except admin.sites.NotRegistered:
     pass
 
 
+from core.admin import PerfilInline, RestricaoInline
+
 @admin.register(User)
 class CustomUserAdmin(DjangoUserAdmin):
-    inlines = [ChatMonitorConfigInline, ChatVinculoOperadorInline]
+    inlines = [PerfilInline, RestricaoInline, ChatMonitorConfigInline, ChatVinculoOperadorInline]
 
 
 # ──────────────────────────────────────────────────────────────────────────────

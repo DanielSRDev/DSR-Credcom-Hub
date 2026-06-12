@@ -79,6 +79,7 @@ TEMPLATES = [
                 # NOVO:
                 "core.context_processors.nav_permissoes",
                 "core.context_processors.minhas_notas",
+                "core.context_processors.jornal_ctx",
                 "chat_interno.context_processors.chat_nav",
             ],
         },

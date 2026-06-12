@@ -2,9 +2,10 @@ from django.contrib.auth import update_session_auth_hash
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib import messages
+from django.http import JsonResponse
 from django.views.decorators.http import require_POST
 
-from .models import AnotacaoPessoal
+from .models import AnotacaoPessoal, JornalPost, JornalLeitura
 
 
 @login_required
@@ -126,3 +127,40 @@ def anotacao_excluir(request, pk):
     nota = get_object_or_404(AnotacaoPessoal, pk=pk, user=request.user)
     nota.delete()
     return _voltar(request)
+
+
+# ── Jornal (mural de novidades) ───────────────────────────────────────────────
+
+@login_required
+@require_POST
+def jornal_criar(request):
+    if not getattr(getattr(request.user, "perfil", None), "pode_publicar_jornal", False):
+        messages.error(request, "Você não tem permissão para publicar no Jornal.")
+        return _voltar(request)
+
+    titulo = request.POST.get("titulo", "").strip()
+    conteudo = request.POST.get("conteudo", "").strip()
+    imagem = request.FILES.get("imagem")
+
+    if not titulo or not conteudo:
+        messages.error(request, "Preencha o título e o conteúdo da publicação.")
+        return _voltar(request)
+
+    JornalPost.objects.create(
+        titulo=titulo,
+        conteudo=conteudo,
+        imagem=imagem,
+        autor=request.user,
+    )
+    messages.success(request, "Publicado no Jornal!")
+    return _voltar(request)
+
+
+@login_required
+@require_POST
+def jornal_marcar_lido(request):
+    ultimo = JornalPost.objects.first()
+    leitura, _ = JornalLeitura.objects.get_or_create(user=request.user)
+    leitura.ultimo_post_visto = ultimo
+    leitura.save(update_fields=["ultimo_post_visto"])
+    return JsonResponse({"ok": True})

@@ -9,4 +9,7 @@ urlpatterns = [
     path("anotacoes/<int:pk>/toggle/", views.anotacao_toggle, name="anotacao_toggle"),
     path("anotacoes/<int:pk>/fixar/", views.anotacao_fixar, name="anotacao_fixar"),
     path("anotacoes/<int:pk>/excluir/", views.anotacao_excluir, name="anotacao_excluir"),
+
+    path("jornal/criar/", views.jornal_criar, name="jornal_criar"),
+    path("jornal/marcar-lido/", views.jornal_marcar_lido, name="jornal_marcar_lido"),
 ]

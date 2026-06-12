@@ -5,7 +5,7 @@ from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.contrib.auth.models import User
 from django.utils.html import format_html
 
-from .models import AnotacaoPessoal, PerfilUsuario, UsuarioRestricaoModulo
+from .models import AnotacaoPessoal, JornalPost, PerfilUsuario, UsuarioRestricaoModulo
 
 logger = logging.getLogger("core.admin")
 
@@ -16,7 +16,7 @@ class PerfilInline(admin.StackedInline):
     model = PerfilUsuario
     can_delete = False
     verbose_name_plural = "Primeiro Acesso / Senha"
-    fields = ("deve_trocar_senha",)
+    fields = ("deve_trocar_senha", "pode_publicar_jornal")
 
 
 class RestricaoInline(admin.TabularInline):
@@ -129,6 +129,14 @@ class UsuarioRestricaoModuloAdmin(admin.ModelAdmin):
             cor,
             obj.get_modulo_bloqueado_display(),
         )
+
+
+@admin.register(JornalPost)
+class JornalPostAdmin(admin.ModelAdmin):
+    list_display = ("titulo", "autor", "criado_em")
+    search_fields = ("titulo", "conteudo")
+    readonly_fields = ("criado_em",)
+    ordering = ("-criado_em",)
 
 
 @admin.register(AnotacaoPessoal)

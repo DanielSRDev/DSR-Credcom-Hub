@@ -28,6 +28,11 @@ class PerfilUsuario(models.Model):
         verbose_name="Deve trocar senha no próximo acesso",
         help_text="Marque para forçar o usuário a criar nova senha no próximo login.",
     )
+    pode_publicar_jornal = models.BooleanField(
+        default=False,
+        verbose_name="Pode publicar no Jornal",
+        help_text="Marque para permitir que este usuário publique novidades no Jornal.",
+    )
 
     class Meta:
         verbose_name = "Perfil de usuário"
@@ -109,6 +114,60 @@ class AnotacaoPessoal(models.Model):
 
     def __str__(self):
         return f"{self.user.username}: {self.texto[:40]}"
+
+
+class JornalPost(models.Model):
+    """
+    Postagem do "Jornal" (mural de novidades/atualizações) exibido na navbar.
+    """
+
+    titulo = models.CharField(max_length=200, verbose_name="Título")
+    conteudo = models.TextField(verbose_name="Conteúdo")
+    imagem = models.ImageField(upload_to="jornal/", blank=True, null=True, verbose_name="Imagem")
+    autor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="jornal_posts",
+        verbose_name="Autor",
+    )
+    criado_em = models.DateTimeField(auto_now_add=True, verbose_name="Publicado em")
+
+    class Meta:
+        verbose_name = "Postagem do Jornal"
+        verbose_name_plural = "Postagens do Jornal"
+        ordering = ["-criado_em"]
+
+    def __str__(self):
+        return self.titulo
+
+
+class JornalLeitura(models.Model):
+    """
+    Guarda a última postagem do Jornal já vista por cada usuário,
+    para exibir o aviso de novidade apenas uma vez por post.
+    """
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="jornal_leitura",
+        verbose_name="Usuário",
+    )
+    ultimo_post_visto = models.ForeignKey(
+        JornalPost,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name="Última postagem vista",
+    )
+
+    class Meta:
+        verbose_name = "Leitura do Jornal"
+        verbose_name_plural = "Leituras do Jornal"
+
+    def __str__(self):
+        return f"{self.user.username} — visto até #{self.ultimo_post_visto_id}"
 
 
 class UsuarioRestricaoModulo(models.Model):

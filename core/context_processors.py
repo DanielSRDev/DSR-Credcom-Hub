@@ -56,6 +56,7 @@ def nav_permissoes(request) -> Dict[str, bool]:
         "is_coordenacao":           False,
         "is_supervisao":            False,
         "is_operador":              False,
+        "pode_postar_jornal":       False,
     }
 
     if not user or not user.is_authenticated:
@@ -73,6 +74,7 @@ def nav_permissoes(request) -> Dict[str, bool]:
             "is_coordenacao":           True,
             "is_supervisao":            True,
             "is_operador":              True,
+            "pode_postar_jornal":       getattr(getattr(user, "perfil", None), "pode_publicar_jornal", False),
         }
 
     bloqueados = _modulos_bloqueados(user)
@@ -114,6 +116,8 @@ def nav_permissoes(request) -> Dict[str, bool]:
         and nao_bloqueado("financeiro")
     )
 
+    pode_postar_jornal = getattr(getattr(user, "perfil", None), "pode_publicar_jornal", False)
+
     return {
         "pode_ver_operacao":        pode_ver_operacao,
         "pode_ver_gestao":          pode_ver_gestao,
@@ -125,6 +129,30 @@ def nav_permissoes(request) -> Dict[str, bool]:
         "is_coordenacao":           is_coordenacao,
         "is_supervisao":            is_supervisao,
         "is_operador":              is_operador,
+        "pode_postar_jornal":       pode_postar_jornal,
+    }
+
+
+def jornal_ctx(request) -> Dict[str, object]:
+    """
+    Disponibiliza as últimas postagens do Jornal e se há novidade
+    não vista pelo usuário logado (exibida uma única vez por post).
+    """
+    user = getattr(request, "user", None)
+    if not user or not user.is_authenticated:
+        return {"jornal_posts": [], "jornal_tem_novidade": False}
+
+    from core.models import JornalPost, JornalLeitura
+
+    posts = list(JornalPost.objects.all()[:20])
+    ultimo = posts[0] if posts else None
+
+    leitura, _ = JornalLeitura.objects.get_or_create(user=user)
+    tem_novidade = bool(ultimo and leitura.ultimo_post_visto_id != ultimo.id)
+
+    return {
+        "jornal_posts": posts,
+        "jornal_tem_novidade": tem_novidade,
     }
 
 
