@@ -26,6 +26,43 @@ from .services import (
 
 User = get_user_model()
 
+HISTORY_PAGE_SIZE = 50
+
+
+def _serialize_message(m, actor):
+    reply_to_data = None
+    if m.reply_to_id and m.reply_to:
+        rt = m.reply_to
+        reply_to_data = {
+            "id": rt.id,
+            "sender_name": (rt.sender.get_full_name() or rt.sender.get_username() if rt.sender else "?"),
+            "texto": (rt.texto or "")[:100],
+            "imagem_url": (rt.imagem.url if getattr(rt, "imagem", None) else None),
+        }
+
+    reactions = {}
+    for r in m.reactions.all():
+        if r.emoji not in reactions:
+            reactions[r.emoji] = {"count": 0, "mine": False}
+        reactions[r.emoji]["count"] += 1
+        if r.user_id == actor.id:
+            reactions[r.emoji]["mine"] = True
+
+    return {
+        "id": m.id,
+        "sender_id": m.sender_id,
+        "sender_name": (
+            m.sender.get_full_name() or m.sender.get_username()
+            if m.sender else "Contato"
+        ),
+        "texto": m.texto or "",
+        "imagem_url": (m.imagem.url if getattr(m, "imagem", None) else None),
+        "criado_em": m.criado_em.isoformat(),
+        "is_me": m.sender_id == actor.id,
+        "reply_to": reply_to_data,
+        "reactions": reactions,
+    }
+
 
 def can_monitor_chat(user) -> bool:
     if not user or not user.is_authenticated:
@@ -140,46 +177,22 @@ def history(request, user_id: int):
     if not (can_send_to(actor, other) or can_send_to(other, actor)):
         return JsonResponse({"error": "Sem permissão."}, status=403)
 
-    msgs, conv = list_messages_between(actor, other)
+    def _parse_id(name):
+        raw = (request.GET.get(name) or "").strip()
+        return int(raw) if raw.isdigit() else None
 
-    items = []
-    for m in msgs:
-        reply_to_data = None
-        if m.reply_to_id and m.reply_to:
-            rt = m.reply_to
-            reply_to_data = {
-                "id": rt.id,
-                "sender_name": (rt.sender.get_full_name() or rt.sender.get_username() if rt.sender else "?"),
-                "texto": (rt.texto or "")[:100],
-                "imagem_url": (rt.imagem.url if getattr(rt, "imagem", None) else None),
-            }
+    after_id = _parse_id("after_id")
+    before_id = _parse_id("before_id")
 
-        reactions = {}
-        for r in m.reactions.all():
-            if r.emoji not in reactions:
-                reactions[r.emoji] = {"count": 0, "mine": False}
-            reactions[r.emoji]["count"] += 1
-            if r.user_id == actor.id:
-                reactions[r.emoji]["mine"] = True
+    if after_id:
+        msgs, conv, has_more = list_messages_between(actor, other, after_id=after_id)
+    else:
+        limit_raw = (request.GET.get("limit") or "").strip()
+        limit = int(limit_raw) if limit_raw.isdigit() else HISTORY_PAGE_SIZE
+        msgs, conv, has_more = list_messages_between(actor, other, limit=limit, before_id=before_id)
 
-        items.append(
-            {
-                "id": m.id,
-                "sender_id": m.sender_id,
-                "sender_name": (
-                    m.sender.get_full_name() or m.sender.get_username()
-                    if m.sender else "Contato"
-                ),
-                "texto": m.texto or "",
-                "imagem_url": (m.imagem.url if getattr(m, "imagem", None) else None),
-                "criado_em": m.criado_em.isoformat(),
-                "is_me": m.sender_id == actor.id,
-                "reply_to": reply_to_data,
-                "reactions": reactions,
-            }
-        )
-
-    return JsonResponse({"items": items})
+    items = [_serialize_message(m, actor) for m in msgs]
+    return JsonResponse({"items": items, "has_more": has_more})
 
 
 @login_required
@@ -255,7 +268,7 @@ def export_history(request):
     user1 = get_user(u1_raw)
     user2 = get_user(u2_raw)
 
-    msgs, _ = list_messages_between(user1, user2)
+    msgs, _, _ = list_messages_between(user1, user2)
 
     resp = HttpResponse(content_type="text/csv; charset=utf-8")
     resp["Content-Disposition"] = f'attachment; filename="chat_{user1.id}_{user2.id}.csv"'

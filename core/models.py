@@ -1,6 +1,7 @@
 import logging
 
 from django.conf import settings
+from django.core.validators import FileExtensionValidator
 from django.db import models
 from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
@@ -121,9 +122,18 @@ class JornalPost(models.Model):
     Postagem do "Jornal" (mural de novidades/atualizações) exibido na navbar.
     """
 
+    ARQUIVO_EXTS = ["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "zip", "rar", "txt", "csv"]
+
     titulo = models.CharField(max_length=200, verbose_name="Título")
     conteudo = models.TextField(verbose_name="Conteúdo")
     imagem = models.ImageField(upload_to="jornal/", blank=True, null=True, verbose_name="Imagem")
+    arquivo = models.FileField(
+        upload_to="jornal/arquivos/",
+        blank=True,
+        null=True,
+        verbose_name="Arquivo (PDF, DOC, etc.)",
+        validators=[FileExtensionValidator(allowed_extensions=ARQUIVO_EXTS)],
+    )
     autor = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -132,6 +142,7 @@ class JornalPost(models.Model):
         verbose_name="Autor",
     )
     criado_em = models.DateTimeField(auto_now_add=True, verbose_name="Publicado em")
+    editado_em = models.DateTimeField(null=True, blank=True, verbose_name="Editado em")
 
     class Meta:
         verbose_name = "Postagem do Jornal"
@@ -140,6 +151,40 @@ class JornalPost(models.Model):
 
     def __str__(self):
         return self.titulo
+
+    @property
+    def nome_arquivo(self):
+        if not self.arquivo:
+            return ""
+        return self.arquivo.name.rsplit("/", 1)[-1]
+
+
+class JornalLike(models.Model):
+    """
+    Curtida de um usuário em uma postagem do Jornal.
+    """
+
+    post = models.ForeignKey(
+        JornalPost,
+        on_delete=models.CASCADE,
+        related_name="likes",
+        verbose_name="Postagem",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="jornal_likes",
+        verbose_name="Usuário",
+    )
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Curtida do Jornal"
+        verbose_name_plural = "Curtidas do Jornal"
+        unique_together = ("post", "user")
+
+    def __str__(self):
+        return f"{self.user.username} curtiu #{self.post_id}"
 
 
 class JornalLeitura(models.Model):

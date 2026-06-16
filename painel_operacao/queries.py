@@ -32,6 +32,24 @@ acordo_parcela_resumo AS (
     FROM dbo.tb_acordo_parcela
     GROUP BY aco_id
 ),
+-- valores por negociação, para corrigir acordos que cobrem mais de um contrato
+-- e vêm com principal/multa/juros/HO duplicados no nível de tb_acordo
+valores_por_negociacao AS (
+    SELECT
+        ap.aco_id,
+        p.neg_id,
+        SUM(ap.acp_principal)   AS principal_bruto,
+        SUM(ap.acp_desc_princ)  AS desc_principal,
+        SUM(ap.acp_multa)       AS multa_bruta,
+        SUM(ap.acp_desc_multa)  AS desc_multa,
+        SUM(ap.acp_juros)       AS juros_brutos,
+        SUM(ap.acp_desc_juros)  AS desc_juros,
+        SUM(ap.acp_ho)          AS ho_bruto,
+        SUM(ap.acp_desc_ho)     AS desc_ho
+    FROM dbo.tb_acordo_parcela ap
+    INNER JOIN dbo.tb_parcela p ON p.par_id = ap.par_id
+    GROUP BY ap.aco_id, p.neg_id
+),
 base_acordo AS (
     SELECT DISTINCT
         a.aco_id,
@@ -55,6 +73,8 @@ base_acordo AS (
         a.aco_tipo,
         a.aco_etl_alteracao,
         ISNULL(a.aco_taxa, 0) AS taxa_liquida,
+
+        COALESCE(n.neg_id, n_nv.neg_id) AS neg_id,
 
         COALESCE(pss.pes_nome, pss_nv.pes_nome) AS pes_nome,
         COALESCE(pss.pes_cpfcnpj, pss_nv.pes_cpfcnpj) AS pes_cpfcnpj,
@@ -119,18 +139,18 @@ SELECT
     ) AS filial,
     COALESCE(pr.pro_nome, pr_ev.pro_nome) AS tipo_contrato,
     STRING_AGG(ac_tipo.cca_valor, ' | ') AS tipo_negociacao,
-    b.aco_principal AS principal_bruto,
-    ISNULL(b.aco_desc_princ, 0) AS desconto_principal,
-    b.aco_principal - ISNULL(b.aco_desc_princ, 0) AS principal_liquido,
-    b.aco_multa AS multa_bruta,
-    ISNULL(b.aco_desc_multa, 0) AS desconto_multa,
-    b.aco_multa - ISNULL(b.aco_desc_multa, 0) AS multa_liquida,
-    b.aco_juros AS juros_bruto,
-    ISNULL(b.aco_desc_juros, 0) AS desconto_juros,
-    b.aco_juros - ISNULL(b.aco_desc_juros, 0) AS juros_liquido,
-    b.aco_ho AS honorario_bruto,
-    ISNULL(b.aco_desc_ho, 0) AS desconto_honorario,
-    b.aco_ho - ISNULL(b.aco_desc_ho, 0) AS honorario_liquido,
+    ISNULL(vpn.principal_bruto, b.aco_principal) AS principal_bruto,
+    ISNULL(vpn.desc_principal, ISNULL(b.aco_desc_princ, 0)) AS desconto_principal,
+    ISNULL(vpn.principal_bruto - vpn.desc_principal, b.aco_principal - ISNULL(b.aco_desc_princ, 0)) AS principal_liquido,
+    ISNULL(vpn.multa_bruta, b.aco_multa) AS multa_bruta,
+    ISNULL(vpn.desc_multa, ISNULL(b.aco_desc_multa, 0)) AS desconto_multa,
+    ISNULL(vpn.multa_bruta - vpn.desc_multa, b.aco_multa - ISNULL(b.aco_desc_multa, 0)) AS multa_liquida,
+    ISNULL(vpn.juros_brutos, b.aco_juros) AS juros_bruto,
+    ISNULL(vpn.desc_juros, ISNULL(b.aco_desc_juros, 0)) AS desconto_juros,
+    ISNULL(vpn.juros_brutos - vpn.desc_juros, b.aco_juros - ISNULL(b.aco_desc_juros, 0)) AS juros_liquido,
+    ISNULL(vpn.ho_bruto, b.aco_ho) AS honorario_bruto,
+    ISNULL(vpn.desc_ho, ISNULL(b.aco_desc_ho, 0)) AS desconto_honorario,
+    ISNULL(vpn.ho_bruto - vpn.desc_ho, b.aco_ho - ISNULL(b.aco_desc_ho, 0)) AS honorario_liquido,
     ISNULL(b.aco_despesas, 0) AS despesas,
     ISNULL(b.despesa_liquida, 0) AS despesa_liquida,
     ISNULL(b.taxa_liquida, 0) AS taxa_liquida,
@@ -171,6 +191,10 @@ LEFT JOIN dbo.tb_acordo_campo ac_tipo
     ON ac_tipo.aco_id = b.aco_id
    AND ac_tipo.cca_id = tnc.cca_id
    AND ac_tipo.cca_valor IS NOT NULL
+-- valores financeiros por negociação (correção de duplicação em acordos multi-contrato)
+LEFT JOIN valores_por_negociacao vpn
+    ON vpn.aco_id = b.aco_id
+   AND vpn.neg_id = b.neg_id
 WHERE (
     b.aco_data IS NULL
     OR b.aco_data < DATEADD(DAY, 1, %s)
@@ -218,7 +242,11 @@ GROUP BY
     cr_ev.cre_sigla,
     cf_ev.fil_codigo,
     cf_ev.fil_nome,
-    pr_ev.pro_nome
+    pr_ev.pro_nome,
+    vpn.principal_bruto, vpn.desc_principal,
+    vpn.multa_bruta,     vpn.desc_multa,
+    vpn.juros_brutos,    vpn.desc_juros,
+    vpn.ho_bruto,        vpn.desc_ho
 ORDER BY ev.evc_data DESC
 """
 
@@ -264,6 +292,16 @@ evento_acordo AS (
         ON op.ope_id = ce.ope_id
     WHERE e.eve_nome = 'Acordo'
 ),
+valores_por_negociacao AS (
+    SELECT
+        ap.aco_id,
+        p.neg_id,
+        SUM(ap.acp_ho)      AS ho_bruto,
+        SUM(ap.acp_desc_ho) AS desc_ho
+    FROM dbo.tb_acordo_parcela ap
+    INNER JOIN dbo.tb_parcela p ON p.par_id = ap.par_id
+    GROUP BY ap.aco_id, p.neg_id
+),
 base_acordo AS (
     SELECT DISTINCT
         a.aco_id,
@@ -276,6 +314,8 @@ base_acordo AS (
         a.aco_status,
         a.aco_tipo,
         a.aco_etl_alteracao,
+
+        COALESCE(n.neg_id, n_nv.neg_id) AS neg_id,
 
         COALESCE(pss.pes_nome, pss_nv.pes_nome) AS pes_nome,
         COALESCE(pss.pes_cpfcnpj, pss_nv.pes_cpfcnpj) AS pes_cpfcnpj,
@@ -334,9 +374,9 @@ SELECT
     ) AS filial,
     COALESCE(pr.pro_nome, pr_ev.pro_nome) AS tipo_contrato,
     STRING_AGG(ac_tipo.cca_valor, ' | ') AS tipo_negociacao,
-    b.aco_ho AS honorario_bruto,
-    b.desconto_honorario AS desconto_honorario,
-    b.aco_ho - b.desconto_honorario AS honorario_liquido,
+    ISNULL(vpn.ho_bruto, b.aco_ho) AS honorario_bruto,
+    ISNULL(vpn.desc_ho, b.desconto_honorario) AS desconto_honorario,
+    ISNULL(vpn.ho_bruto - vpn.desc_ho, b.aco_ho - b.desconto_honorario) AS honorario_liquido,
     b.taxa_liquida AS taxa_liquida,
     b.aco_num_parc AS qtd_parcelas_acordo,
     ast.aco_status_descricao AS status_acordo,
@@ -373,6 +413,10 @@ LEFT JOIN (
 LEFT JOIN dbo.tb_credor cr_ev    ON cr_ev.cre_id = con_ev.cre_id
 LEFT JOIN dbo.tb_credor_filial cf_ev ON cf_ev.fil_id = con_ev.fil_id
 LEFT JOIN dbo.tb_produto pr_ev   ON pr_ev.pro_id = con_ev.pro_id
+-- valores financeiros por negociação (correção de duplicação em acordos multi-contrato)
+LEFT JOIN valores_por_negociacao vpn
+    ON vpn.aco_id = b.aco_id
+   AND vpn.neg_id = b.neg_id
 WHERE ev.evc_data >= %s
   AND ev.evc_data < DATEADD(DAY, 1, %s)
 GROUP BY
@@ -402,7 +446,8 @@ GROUP BY
     cr_ev.cre_sigla,
     cf_ev.fil_codigo,
     cf_ev.fil_nome,
-    pr_ev.pro_nome
+    pr_ev.pro_nome,
+    vpn.ho_bruto, vpn.desc_ho
 ORDER BY ev.evc_data DESC
 """
 
@@ -458,6 +503,23 @@ acordo_parcela_resumo AS (
     GROUP BY aco_id
 ),
 
+valores_por_negociacao AS (
+    SELECT
+        ap.aco_id,
+        p.neg_id,
+        SUM(ap.acp_principal)   AS principal_bruto,
+        SUM(ap.acp_desc_princ)  AS desc_principal,
+        SUM(ap.acp_multa)       AS multa_bruta,
+        SUM(ap.acp_desc_multa)  AS desc_multa,
+        SUM(ap.acp_juros)       AS juros_brutos,
+        SUM(ap.acp_desc_juros)  AS desc_juros,
+        SUM(ap.acp_ho)          AS ho_bruto,
+        SUM(ap.acp_desc_ho)     AS desc_ho
+    FROM dbo.tb_acordo_parcela ap
+    INNER JOIN dbo.tb_parcela p ON p.par_id = ap.par_id
+    GROUP BY ap.aco_id, p.neg_id
+),
+
 base_acordo AS (
     SELECT DISTINCT
         a.aco_id,
@@ -483,6 +545,8 @@ base_acordo AS (
         a.aco_status,
         a.aco_tipo,
         a.aco_etl_alteracao,
+
+        COALESCE(n.neg_id, n_nv.neg_id) AS neg_id,
 
         COALESCE(pss.pes_nome, pss_nv.pes_nome) AS pes_nome,
         COALESCE(pss.pes_cpfcnpj, pss_nv.pes_cpfcnpj) AS pes_cpfcnpj,
@@ -557,13 +621,13 @@ SELECT
     COALESCE(pr.pro_nome, pr_ev.pro_nome) AS tipo_contrato,
     CAST(NULL AS VARCHAR(255)) AS tipo_negociacao,
 
-    b.aco_principal - b.desconto_principal AS principal_liquido,
-    b.aco_multa - b.desconto_multa AS multa_liquida,
-    b.aco_juros - b.desconto_juros AS juros_liquido,
+    ISNULL(vpn.principal_bruto - vpn.desc_principal, b.aco_principal - b.desconto_principal) AS principal_liquido,
+    ISNULL(vpn.multa_bruta - vpn.desc_multa, b.aco_multa - b.desconto_multa) AS multa_liquida,
+    ISNULL(vpn.juros_brutos - vpn.desc_juros, b.aco_juros - b.desconto_juros) AS juros_liquido,
 
-    b.aco_ho AS honorario_bruto,
-    b.desconto_honorario AS desconto_honorario,
-    b.aco_ho - b.desconto_honorario AS honorario_liquido,
+    ISNULL(vpn.ho_bruto, b.aco_ho) AS honorario_bruto,
+    ISNULL(vpn.desc_ho, b.desconto_honorario) AS desconto_honorario,
+    ISNULL(vpn.ho_bruto - vpn.desc_ho, b.aco_ho - b.desconto_honorario) AS honorario_liquido,
     ISNULL(b.despesa_liquida, 0) AS despesa_liquida,
     ISNULL(b.taxa_liquida, 0) AS taxa_liquida,
     ISNULL(b.valor_entrada, 0) AS valor_entrada,
@@ -606,6 +670,11 @@ LEFT JOIN (
 LEFT JOIN dbo.tb_credor cr_ev    ON cr_ev.cre_id = con_ev.cre_id
 LEFT JOIN dbo.tb_credor_filial cf_ev ON cf_ev.fil_id = con_ev.fil_id
 LEFT JOIN dbo.tb_produto pr_ev   ON pr_ev.pro_id = con_ev.pro_id
+
+-- valores financeiros por negociação (correção de duplicação em acordos multi-contrato)
+LEFT JOIN valores_por_negociacao vpn
+    ON vpn.aco_id = b.aco_id
+   AND vpn.neg_id = b.neg_id
 
 WHERE pg.rn = 1
 

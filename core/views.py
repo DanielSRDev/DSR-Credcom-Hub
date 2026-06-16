@@ -5,7 +5,9 @@ from django.contrib import messages
 from django.http import JsonResponse
 from django.views.decorators.http import require_POST
 
-from .models import AnotacaoPessoal, JornalPost, JornalLeitura
+from django.utils import timezone
+
+from .models import AnotacaoPessoal, JornalPost, JornalLeitura, JornalLike
 
 
 @login_required
@@ -131,6 +133,22 @@ def anotacao_excluir(request, pk):
 
 # ── Jornal (mural de novidades) ───────────────────────────────────────────────
 
+IMAGEM_EXTS = ("jpg", "jpeg", "png", "gif", "webp", "bmp")
+
+
+def _split_anexo(f):
+    """
+    Recebe um único arquivo enviado e retorna (imagem, arquivo) — preenchendo
+    apenas o campo correspondente conforme a extensão do arquivo.
+    """
+    if not f:
+        return None, None
+    ext = f.name.rsplit(".", 1)[-1].lower() if "." in f.name else ""
+    if ext in IMAGEM_EXTS:
+        return f, None
+    return None, f
+
+
 @login_required
 @require_POST
 def jornal_criar(request):
@@ -140,7 +158,7 @@ def jornal_criar(request):
 
     titulo = request.POST.get("titulo", "").strip()
     conteudo = request.POST.get("conteudo", "").strip()
-    imagem = request.FILES.get("imagem")
+    imagem, arquivo = _split_anexo(request.FILES.get("anexo"))
 
     if not titulo or not conteudo:
         messages.error(request, "Preencha o título e o conteúdo da publicação.")
@@ -150,9 +168,68 @@ def jornal_criar(request):
         titulo=titulo,
         conteudo=conteudo,
         imagem=imagem,
+        arquivo=arquivo,
         autor=request.user,
     )
     messages.success(request, "Publicado no Jornal!")
+    return _voltar(request)
+
+
+@login_required
+@require_POST
+def jornal_editar(request, pk):
+    post = get_object_or_404(JornalPost, pk=pk)
+
+    if post.autor_id != request.user.id and not request.user.is_staff:
+        messages.error(request, "Você não pode editar esta publicação.")
+        return _voltar(request)
+
+    titulo = request.POST.get("titulo", "").strip()
+    conteudo = request.POST.get("conteudo", "").strip()
+
+    if not titulo or not conteudo:
+        messages.error(request, "Preencha o título e o conteúdo da publicação.")
+        return _voltar(request)
+
+    post.titulo = titulo
+    post.conteudo = conteudo
+
+    nova_imagem, novo_arquivo = _split_anexo(request.FILES.get("anexo"))
+
+    if nova_imagem:
+        post.imagem = nova_imagem
+    elif request.POST.get("remover_imagem") == "on":
+        post.imagem = None
+
+    if novo_arquivo:
+        post.arquivo = novo_arquivo
+    elif request.POST.get("remover_arquivo") == "on":
+        post.arquivo = None
+
+    post.editado_em = timezone.now()
+    post.save()
+
+    messages.success(request, "Publicação atualizada.")
+    return _voltar(request)
+
+
+@login_required
+@require_POST
+def jornal_curtir(request, pk):
+    post = get_object_or_404(JornalPost, pk=pk)
+
+    like, criado = JornalLike.objects.get_or_create(post=post, user=request.user)
+    if not criado:
+        like.delete()
+        liked = False
+    else:
+        liked = True
+
+    total = post.likes.count()
+
+    if request.headers.get("x-requested-with") == "XMLHttpRequest":
+        return JsonResponse({"ok": True, "liked": liked, "total": total})
+
     return _voltar(request)
 
 

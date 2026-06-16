@@ -205,10 +205,34 @@ def _get_or_create_conversation(u1, u2):
     return conv
 
 
-def list_messages_between(me, other):
+def list_messages_between(me, other, limit=None, before_id=None, after_id=None):
+    """
+    Retorna (msgs, conv, has_more) em ordem cronológica (mais antiga -> mais recente).
+
+    - after_id: só mensagens com id > after_id (usado no polling incremental, sem limite).
+    - before_id + limit: pega as `limit` mensagens anteriores ao before_id (paginação "carregar mais antigas").
+    - limit (sem before_id): pega as `limit` mensagens mais recentes da conversa.
+    - sem nenhum filtro/limite: retorna o histórico completo (usado na exportação).
+    """
     conv = _get_or_create_conversation(me, other)
-    msgs = conv.messages.select_related("sender", "reply_to__sender").prefetch_related("reactions").all()
-    return msgs, conv
+    qs = conv.messages.select_related("sender", "reply_to__sender").prefetch_related("reactions")
+
+    if after_id:
+        msgs = list(qs.filter(id__gt=after_id).order_by("criado_em"))
+        return msgs, conv, False
+
+    if before_id:
+        qs = qs.filter(id__lt=before_id)
+
+    if limit:
+        page = list(qs.order_by("-criado_em")[: limit + 1])
+        has_more = len(page) > limit
+        page = page[:limit]
+        page.reverse()
+        return page, conv, has_more
+
+    msgs = list(qs.order_by("criado_em"))
+    return msgs, conv, False
 
 
 # ==========

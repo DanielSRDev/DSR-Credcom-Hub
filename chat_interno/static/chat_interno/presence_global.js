@@ -15,16 +15,6 @@
     return getCookie("csrftoken");
   }
 
-  async function apiGet(url) {
-    const r = await fetch(url, {
-      credentials: "same-origin",
-      headers: {
-        "X-Requested-With": "XMLHttpRequest"
-      }
-    });
-    return await r.json().catch(() => ({}));
-  }
-
   async function apiPost(url, formData) {
     const r = await fetch(url, {
       method: "POST",
@@ -42,16 +32,6 @@
     try {
       const fd = new FormData();
       await apiPost("/chat/ping/", fd);
-    } catch {}
-  }
-
-  async function fetchStatusFromServer() {
-    try {
-      const data = await apiGet("/chat/api/my-status/");
-      if (data?.status) {
-        currentStatus = data.status;
-        localStorage.setItem("chat_presence_status", currentStatus);
-      }
     } catch {}
   }
 
@@ -87,7 +67,12 @@
     loadStatusFromLocalStorage();
 
     if (!localStorage.getItem("chat_presence_status")) {
-      await fetchStatusFromServer();
+      // Primeira vez (sem preferência salva): entra como "online" por padrão.
+      currentStatus = "online";
+      localStorage.setItem("chat_presence_status", currentStatus);
+      const fd = new FormData();
+      fd.append("status", "online");
+      await apiPost("/chat/api/status/", fd).catch(() => {});
     }
 
     await startPingLoop();

@@ -120,12 +120,14 @@
                             Exportar Painel
                         </button>
 
-                        <button type="submit"
-                                formaction="{% url 'painel_operacao:atualizar_relatorio_geral' %}"
-                                formmethod="post"
-                                class="btn btn-warning">
-                            Atualizar Relatório Geral
-                        </button>
+{% comment %}
+<button type="submit"
+        formaction="{% url 'painel_operacao:atualizar_relatorio_geral' %}"
+        formmethod="post"
+        class="btn btn-warning">
+    Atualizar Relatório Geral
+</button>
+{% endcomment %}
 
                         <button type="submit"
                                 formaction="{% url 'painel_operacao:exportar_relatorio_geral' %}"

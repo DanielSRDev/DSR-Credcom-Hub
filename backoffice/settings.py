@@ -162,6 +162,10 @@ NIBO_BASE_URL = "https://api.nibo.com.br/empresas/v1"
 NIBO_API_TOKEN = os.getenv("NIBO_API_TOKEN")
 NIBO_ACCOUNT_ID = os.getenv("NIBO_ACCOUNT_ID")
 
+# Senha exigida para reenviar lançamentos que já estão marcados como enviado=True.
+# Conhecida apenas pelo chefe do financeiro.
+NIBO_REENVIO_SENHA = os.getenv("NIBO_REENVIO_SENHA")
+
 
 
 LOGIN_URL = "/accounts/login/"

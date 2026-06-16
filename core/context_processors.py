@@ -142,13 +142,22 @@ def jornal_ctx(request) -> Dict[str, object]:
     if not user or not user.is_authenticated:
         return {"jornal_posts": [], "jornal_tem_novidade": False}
 
-    from core.models import JornalPost, JornalLeitura
+    from core.models import JornalPost, JornalLeitura, JornalLike
 
     posts = list(JornalPost.objects.all()[:20])
     ultimo = posts[0] if posts else None
 
     leitura, _ = JornalLeitura.objects.get_or_create(user=user)
     tem_novidade = bool(ultimo and leitura.ultimo_post_visto_id != ultimo.id)
+
+    curtidos = set(
+        JornalLike.objects.filter(user=user, post_id__in=[p.id for p in posts])
+        .values_list("post_id", flat=True)
+    )
+    for post in posts:
+        post.likes_count = post.likes.count()
+        post.curtido_por_mim = post.id in curtidos
+        post.pode_editar = post.autor_id == user.id or user.is_staff
 
     return {
         "jornal_posts": posts,

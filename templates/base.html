@@ -120,8 +120,9 @@
               <input type="hidden" name="next" value="{{ request.get_full_path }}">
               <input type="text" name="titulo" class="form-control mb-2" placeholder="Título da novidade" required maxlength="200">
               <textarea name="conteudo" class="form-control mb-2" rows="3" placeholder="Descreva a novidade/atualização..." required></textarea>
-              <div class="d-flex align-items-center gap-2">
-                <input type="file" name="imagem" accept="image/*" class="form-control form-control-sm">
+              <div class="d-flex flex-wrap align-items-center gap-2">
+                <input type="file" name="anexo" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar,.txt,.csv" class="form-control form-control-sm" style="max-width:260px;">
+                <small class="text-secondary">Imagem ou arquivo (PDF, DOC, XLS...)</small>
                 <button type="submit" class="btn btn-primary btn-sm ms-auto">Publicar</button>
               </div>
             </form>
@@ -133,14 +134,74 @@
                 <div class="border rounded p-2">
                   <div class="d-flex justify-content-between align-items-start">
                     <h6 class="mb-1">{{ post.titulo }}</h6>
-                    <small class="text-secondary text-nowrap ms-2">{{ post.criado_em|date:"d/m/Y H:i" }}</small>
+                    <small class="text-secondary text-nowrap ms-2">
+                      {{ post.criado_em|date:"d/m/Y H:i" }}
+                      {% if post.editado_em %}<br>(editado {{ post.editado_em|date:"d/m/Y H:i" }}){% endif %}
+                    </small>
                   </div>
                   <div style="white-space: pre-wrap;">{{ post.conteudo }}</div>
                   {% if post.imagem %}
-                    <img src="{{ post.imagem.url }}" class="img-fluid rounded mt-2" style="max-height:300px;">
+                    <img src="{{ post.imagem.url }}" class="img-fluid rounded mt-2 jornal-img-expand" style="max-height:300px;cursor:zoom-in;" data-full="{{ post.imagem.url }}">
                   {% endif %}
-                  {% if post.autor %}
-                    <div class="small text-secondary mt-1">por {{ post.autor.username }}</div>
+                  {% if post.arquivo %}
+                    <div class="mt-2">
+                      <a href="{{ post.arquivo.url }}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-secondary">
+                        📎 {{ post.nome_arquivo }}
+                      </a>
+                    </div>
+                  {% endif %}
+
+                  <div class="d-flex justify-content-between align-items-center mt-2">
+                    <div>
+                      {% if post.autor %}
+                        <span class="small text-secondary">por {{ post.autor.username }}</span>
+                      {% endif %}
+                    </div>
+                    <div class="d-flex align-items-center gap-2">
+                      <form method="post" action="{% url 'core:jornal_curtir' post.id %}" class="jornal-like-form d-inline">
+                        {% csrf_token %}
+                        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                        <button type="submit" class="btn btn-sm {% if post.curtido_por_mim %}btn-primary{% else %}btn-outline-primary{% endif %}">
+                          👍 <span class="jornal-like-count">{{ post.likes_count }}</span>
+                        </button>
+                      </form>
+
+                      {% if post.pode_editar %}
+                        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="collapse" data-bs-target="#jornalEdit{{ post.id }}">
+                          ✏️ Editar
+                        </button>
+                      {% endif %}
+                    </div>
+                  </div>
+
+                  {% if post.pode_editar %}
+                    <div class="collapse mt-2" id="jornalEdit{{ post.id }}">
+                      <form method="post" action="{% url 'core:jornal_editar' post.id %}" enctype="multipart/form-data" class="border rounded p-2">
+                        {% csrf_token %}
+                        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                        <input type="text" name="titulo" class="form-control form-control-sm mb-2" value="{{ post.titulo }}" required maxlength="200">
+                        <textarea name="conteudo" class="form-control form-control-sm mb-2" rows="3" required>{{ post.conteudo }}</textarea>
+
+                        <div class="mb-2">
+                          <label class="form-label small mb-1">Imagem ou arquivo (deixe em branco para manter o atual)</label>
+                          <input type="file" name="anexo" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar,.txt,.csv" class="form-control form-control-sm mb-1">
+                          {% if post.imagem %}
+                            <div class="form-check">
+                              <input class="form-check-input" type="checkbox" name="remover_imagem" id="remImg{{ post.id }}">
+                              <label class="form-check-label small" for="remImg{{ post.id }}">Remover imagem atual</label>
+                            </div>
+                          {% endif %}
+                          {% if post.arquivo %}
+                            <div class="form-check">
+                              <input class="form-check-input" type="checkbox" name="remover_arquivo" id="remArq{{ post.id }}">
+                              <label class="form-check-label small" for="remArq{{ post.id }}">Remover arquivo atual ({{ post.nome_arquivo }})</label>
+                            </div>
+                          {% endif %}
+                        </div>
+
+                        <button type="submit" class="btn btn-sm btn-primary">Salvar alterações</button>
+                      </form>
+                    </div>
                   {% endif %}
                 </div>
               {% endfor %}
@@ -153,6 +214,25 @@
       </div>
     </div>
   </div>
+
+  <!-- Lightbox para expandir imagens do Jornal -->
+  <div class="modal fade" id="jornalImgModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-xl">
+      <div class="modal-content bg-transparent border-0">
+        <button type="button" class="btn-close btn-close-white ms-auto m-2" data-bs-dismiss="modal"></button>
+        <img id="jornalImgModalImg" src="" class="img-fluid rounded mx-auto" style="max-height:85vh;">
+      </div>
+    </div>
+  </div>
+  <script>
+    document.addEventListener("click", function (e) {
+      var img = e.target.closest(".jornal-img-expand");
+      if (!img) return;
+      var modalImg = document.getElementById("jornalImgModalImg");
+      modalImg.src = img.dataset.full;
+      new bootstrap.Modal(document.getElementById("jornalImgModal")).show();
+    });
+  </script>
 
   <!-- Toast: nova publicação no Jornal -->
   {% if jornal_tem_novidade %}

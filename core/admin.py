@@ -5,7 +5,7 @@ from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.contrib.auth.models import User
 from django.utils.html import format_html
 
-from .models import AnotacaoPessoal, JornalPost, PerfilUsuario, UsuarioRestricaoModulo
+from .models import AnotacaoPessoal, JornalPost, JornalLike, PerfilUsuario, UsuarioRestricaoModulo
 
 logger = logging.getLogger("core.admin")
 
@@ -133,10 +133,17 @@ class UsuarioRestricaoModuloAdmin(admin.ModelAdmin):
 
 @admin.register(JornalPost)
 class JornalPostAdmin(admin.ModelAdmin):
-    list_display = ("titulo", "autor", "criado_em")
+    list_display = ("titulo", "autor", "criado_em", "editado_em")
     search_fields = ("titulo", "conteudo")
-    readonly_fields = ("criado_em",)
+    readonly_fields = ("criado_em", "editado_em")
     ordering = ("-criado_em",)
+
+
+@admin.register(JornalLike)
+class JornalLikeAdmin(admin.ModelAdmin):
+    list_display = ("post", "user", "criado_em")
+    search_fields = ("post__titulo", "user__username")
+    autocomplete_fields = ("post", "user")
 
 
 @admin.register(AnotacaoPessoal)

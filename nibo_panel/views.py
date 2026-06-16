@@ -13,6 +13,7 @@ from django.shortcuts import redirect, render
 from django.views.decorators.http import require_POST
 
 from .forms import FiltroForm
+from .models import CredorVisivel
 from .services.categories_map import CATEGORIES as CAT
 from .services.nibo import (
     find_or_create_customer,
@@ -173,16 +174,23 @@ def _filtro_data_fragment(data_ini, data_fim, col="pgo_data"):
 
 def _all_credor_siglas() -> list[str]:
     sql = """
-        SELECT DISTINCT credor_sigla FROM tb_repasse      WHERE credor_sigla IS NOT NULL
+        SELECT DISTINCT credor_sigla, credor_id FROM tb_repasse      WHERE credor_sigla IS NOT NULL
         UNION
-        SELECT DISTINCT credor_sigla FROM tb_repassevr    WHERE credor_sigla IS NOT NULL
+        SELECT DISTINCT credor_sigla, credor_id FROM tb_repassevr    WHERE credor_sigla IS NOT NULL
         UNION
-        SELECT DISTINCT credor_sigla FROM tb_contareceber WHERE credor_sigla IS NOT NULL
+        SELECT DISTINCT credor_sigla, credor_id FROM tb_contareceber WHERE credor_sigla IS NOT NULL
         UNION
-        SELECT DISTINCT credor_sigla FROM tb_contaspagar  WHERE credor_sigla IS NOT NULL
+        SELECT DISTINCT credor_sigla, credor_id FROM tb_contaspagar  WHERE credor_sigla IS NOT NULL
         ORDER BY 1
     """
     rows = qfetchall(sql, [])
+
+    visiveis = set(
+        CredorVisivel.objects.filter(ativo=True).values_list("credor_id", flat=True)
+    )
+    if visiveis:
+        rows = [r for r in rows if r["credor_id"] in visiveis]
+
     return [r["credor_sigla"] for r in rows]
 
 def _in_clause(col: str, values: list[str]) -> tuple[str, list]:
@@ -470,6 +478,43 @@ def enviar_remessa(request):
     CC_PADRAO = request.POST.get("cc_padrao") or None
     processados = 0
 
+    # ----------- checagem de reenvio (registros já enviados) -----------
+    def _ids_ja_enviados(table: str, ids: list[int]) -> list[int]:
+        if not ids:
+            return []
+        pk = PK_COL[table]
+        placeholders = ", ".join(["%s"] * len(ids))
+        rows = qfetchall(
+            f"SELECT {pk} AS id FROM {table} WHERE {pk} IN ({placeholders}) AND enviado = TRUE",
+            ids,
+        )
+        return [r["id"] for r in rows]
+
+    ja_enviados = (
+        _ids_ja_enviados(TB["repasse"], ids_repasse)
+        + _ids_ja_enviados(TB["repassevr"], ids_repassevr)
+        + _ids_ja_enviados(TB["contapagar"], ids_contapagar)
+        + _ids_ja_enviados(TB["contareceber"], ids_contareceber)
+        + _ids_ja_enviados(TB["despesa"], ids_despesa)
+    )
+
+    if ja_enviados:
+        reenvio_confirm = request.POST.get("reenvio_confirm") == "on"
+        reenvio_senha = request.POST.get("reenvio_senha") or ""
+
+        if not reenvio_confirm:
+            messages.error(
+                request,
+                "Você selecionou registro(s) que já constam como ENVIADO. "
+                "Marque a confirmação de reenvio e informe a senha do chefe do financeiro para continuar."
+            )
+            return redirect("nibo_panel:painel")
+
+        senha_correta = settings.NIBO_REENVIO_SENHA
+        if not senha_correta or reenvio_senha != senha_correta:
+            messages.error(request, "Senha de autorização para reenvio inválida.")
+            return redirect("nibo_panel:painel")
+
     def get_by_id(table: str, _id: int):
         pk = PK_COL[table]
         row = qfetchone(f"SELECT * FROM {table} WHERE {pk} = %s", [_id])
@@ -594,9 +639,6 @@ def enviar_remessa(request):
     for _id in ids_repassevr:
         row = get_by_id(TB["repassevr"], _id)
         if not row:
-            continue
-        if row.get("enviado") is True:
-            messages.info(request, f"tb_repassevr id={row['id']} já enviado. Ignorado.")
             continue
 
         valor_dec = _to_dec(row.get("vlr_repasse"))

@@ -16,7 +16,11 @@ window.ChatUI = (() => {
   let sending = false;
   let historyLoading = false;
 
+  const HISTORY_PAGE_SIZE = 50;
+
   let lastRenderedLastId = 0;
+  let oldestRenderedId = 0;
+  let hasMoreOlder = false;
   let lastMarkAt = 0;
 
   let lastSoundId = 0;
@@ -287,8 +291,7 @@ window.ChatUI = (() => {
     const fd = new FormData();
     fd.append("emoji", emoji);
     await apiPost(`/chat/react/${msgId}/`, fd);
-    lastRenderedLastId = 0; // força re-render sem esperar o próximo poll
-    await loadHistory(false);
+    await loadInitialHistory(); // recarrega o lote atual para refletir a reação
   }
 
   async function loadContacts() {
@@ -387,6 +390,8 @@ window.ChatUI = (() => {
     currentOtherId = Number(otherId);
     suppressHistorySound = true;
     lastRenderedLastId = 0;
+    oldestRenderedId = 0;
+    hasMoreOlder = false;
     lastSoundId = 0;
     clearReply();
 
@@ -404,165 +409,219 @@ window.ChatUI = (() => {
 
     setActiveContact(currentOtherId);
 
+    const box = document.getElementById("chatMsgs");
+    if (box) box.innerHTML = "";
+
     await doPing();
     await loadContacts();
-    await loadHistory(true);
+    await loadInitialHistory();
+
+    suppressHistorySound = false;
 
     if (pollTimer) clearInterval(pollTimer);
-    pollTimer = setInterval(() => { loadHistory(false).catch(() => {}); }, 4000);
+    pollTimer = setInterval(() => { pollNewMessages().catch(() => {}); }, 4000);
   }
 
-  async function loadHistory(forceScroll) {
+  // Constrói o elemento DOM de uma mensagem (bolha + reações + ações).
+  function renderMessageNode(m) {
+    const wrap = document.createElement("div");
+    wrap.className = `mb-2 d-flex align-items-center chat-msg-wrap ${m.is_me ? "justify-content-end" : "justify-content-start"}`;
+    wrap.dataset.msgId = m.id;
+
+    const bubble = document.createElement("div");
+    bubble.className = `chat-bubble ${m.is_me ? "mine" : "theirs"}`;
+
+    const senderLabel = m.is_me ? "Você" : (m.sender_name || "Contato");
+
+    // Bloco de citação (reply_to)
+    if (m.reply_to) {
+      const rt = m.reply_to;
+      const rtSender = rt.sender_name || "?";
+      const rtText = rt.texto
+        ? (rt.texto.length > 80 ? rt.texto.substring(0, 80) + "…" : rt.texto)
+        : (rt.imagem_url ? "[imagem]" : "");
+      const quote = document.createElement("div");
+      quote.className = "chat-reply-quote";
+      quote.dataset.replyId = rt.id;
+      quote.innerHTML = `<div class="reply-sender">${escapeHtml(rtSender)}</div><div class="reply-text">${escapeHtml(rtText)}</div>`;
+      bubble.appendChild(quote);
+    }
+
+    // Meta + texto
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    meta.textContent = `${senderLabel} • ${formatDate(m.criado_em)}`;
+    bubble.appendChild(meta);
+
+    if (m.texto) {
+      const body = document.createElement("div");
+      body.className = "body";
+      body.innerHTML = formatTextWithLineBreaks(m.texto);
+      bubble.appendChild(body);
+    }
+
+    if (m.imagem_url) {
+      const img = document.createElement("img");
+      img.className = "chat-img";
+      img.src = m.imagem_url;
+      img.alt = "imagem";
+      bubble.appendChild(img);
+    }
+
+    // Reactions
+    const reactions = m.reactions || {};
+    const reactionEntries = Object.entries(reactions);
+    if (reactionEntries.length > 0) {
+      const reactionDiv = document.createElement("div");
+      reactionDiv.className = "chat-reactions";
+      reactionEntries.forEach(([emoji, info]) => {
+        const span = document.createElement("span");
+        span.className = "chat-reaction-item" + (info.mine ? " mine" : "");
+        span.dataset.action = "react";
+        span.dataset.msgId = m.id;
+        span.dataset.emoji = emoji;
+        span.textContent = `${emoji} ${info.count}`;
+        reactionDiv.appendChild(span);
+      });
+      bubble.appendChild(reactionDiv);
+    }
+
+    // Botões de ação (visíveis no hover)
+    const actions = document.createElement("div");
+    actions.className = "chat-msg-actions";
+
+    const replyBtn = document.createElement("button");
+    replyBtn.className = "chat-action-btn";
+    replyBtn.dataset.action = "reply";
+    replyBtn.dataset.msgId = m.id;
+    replyBtn.dataset.sender = senderLabel;
+    replyBtn.dataset.texto = (m.texto || "").substring(0, 100);
+    replyBtn.title = "Responder";
+    replyBtn.textContent = "↩";
+
+    const reactBtn = document.createElement("button");
+    reactBtn.className = "chat-action-btn";
+    reactBtn.dataset.action = "react";
+    reactBtn.dataset.msgId = m.id;
+    reactBtn.dataset.emoji = "👍";
+    reactBtn.title = "Curtir";
+    reactBtn.textContent = "👍";
+
+    actions.appendChild(replyBtn);
+    actions.appendChild(reactBtn);
+
+    // "mine" → ações à esquerda do bubble; "theirs" → ações à direita
+    if (m.is_me) {
+      wrap.appendChild(actions);
+      wrap.appendChild(bubble);
+    } else {
+      wrap.appendChild(bubble);
+      wrap.appendChild(actions);
+    }
+
+    return wrap;
+  }
+
+  // Carrega o lote inicial (mais recente) de mensagens de uma conversa.
+  async function loadInitialHistory() {
     if (!currentOtherId || historyLoading) return;
     historyLoading = true;
 
     try {
-      const data = await apiGet(`/chat/history/${currentOtherId}/`);
+      const data = await apiGet(`/chat/history/${currentOtherId}/?limit=${HISTORY_PAGE_SIZE}`);
       if (data?.error) return;
 
       const box = document.getElementById("chatMsgs");
       if (!box) return;
 
       const items = data.items || [];
-      const lastMsg = items.length ? items[items.length - 1] : null;
-      const lastId = lastMsg ? Number(lastMsg.id || 0) : 0;
+      hasMoreOlder = !!data.has_more;
 
-      if (lastId && lastId === lastRenderedLastId && !forceScroll) return;
-
-      const wasAtBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
       box.innerHTML = "";
+      items.forEach((m) => box.appendChild(renderMessageNode(m)));
+      box.scrollTop = box.scrollHeight;
 
-      const me = myUserId();
+      const lastMsg = items.length ? items[items.length - 1] : null;
+      lastRenderedLastId = lastMsg ? Number(lastMsg.id || 0) : 0;
+      oldestRenderedId = items.length ? Number(items[0].id || 0) : 0;
+      lastSoundId = lastRenderedLastId;
 
-      items.forEach((m) => {
-        const wrap = document.createElement("div");
-        wrap.className = `mb-2 d-flex align-items-center chat-msg-wrap ${m.is_me ? "justify-content-end" : "justify-content-start"}`;
-        wrap.dataset.msgId = m.id;
-
-        const bubble = document.createElement("div");
-        bubble.className = `chat-bubble ${m.is_me ? "mine" : "theirs"}`;
-
-        const senderLabel = m.is_me ? "Você" : (m.sender_name || "Contato");
-
-        // Bloco de citação (reply_to)
-        if (m.reply_to) {
-          const rt = m.reply_to;
-          const rtSender = rt.sender_name || "?";
-          const rtText = rt.texto
-            ? (rt.texto.length > 80 ? rt.texto.substring(0, 80) + "…" : rt.texto)
-            : (rt.imagem_url ? "[imagem]" : "");
-          const quote = document.createElement("div");
-          quote.className = "chat-reply-quote";
-          quote.dataset.replyId = rt.id;
-          quote.innerHTML = `<div class="reply-sender">${escapeHtml(rtSender)}</div><div class="reply-text">${escapeHtml(rtText)}</div>`;
-          bubble.appendChild(quote);
-        }
-
-        // Meta + texto
-        const meta = document.createElement("div");
-        meta.className = "meta";
-        meta.textContent = `${senderLabel} • ${formatDate(m.criado_em)}`;
-        bubble.appendChild(meta);
-
-        if (m.texto) {
-          const body = document.createElement("div");
-          body.className = "body";
-          body.innerHTML = formatTextWithLineBreaks(m.texto);
-          bubble.appendChild(body);
-        }
-
-        if (m.imagem_url) {
-          const img = document.createElement("img");
-          img.className = "chat-img";
-          img.src = m.imagem_url;
-          img.alt = "imagem";
-          bubble.appendChild(img);
-        }
-
-        // Reactions
-        const reactions = m.reactions || {};
-        const reactionEntries = Object.entries(reactions);
-        if (reactionEntries.length > 0) {
-          const reactionDiv = document.createElement("div");
-          reactionDiv.className = "chat-reactions";
-          reactionEntries.forEach(([emoji, info]) => {
-            const span = document.createElement("span");
-            span.className = "chat-reaction-item" + (info.mine ? " mine" : "");
-            span.dataset.action = "react";
-            span.dataset.msgId = m.id;
-            span.dataset.emoji = emoji;
-            span.textContent = `${emoji} ${info.count}`;
-            reactionDiv.appendChild(span);
-          });
-          bubble.appendChild(reactionDiv);
-        }
-
-        // Botões de ação (visíveis no hover)
-        const actions = document.createElement("div");
-        actions.className = "chat-msg-actions";
-
-        const replyBtn = document.createElement("button");
-        replyBtn.className = "chat-action-btn";
-        replyBtn.dataset.action = "reply";
-        replyBtn.dataset.msgId = m.id;
-        replyBtn.dataset.sender = senderLabel;
-        replyBtn.dataset.texto = (m.texto || "").substring(0, 100);
-        replyBtn.title = "Responder";
-        replyBtn.textContent = "↩";
-
-        const reactBtn = document.createElement("button");
-        reactBtn.className = "chat-action-btn";
-        reactBtn.dataset.action = "react";
-        reactBtn.dataset.msgId = m.id;
-        reactBtn.dataset.emoji = "👍";
-        reactBtn.title = "Curtir";
-        reactBtn.textContent = "👍";
-
-        actions.appendChild(replyBtn);
-        actions.appendChild(reactBtn);
-
-        // "mine" → ações à esquerda do bubble; "theirs" → ações à direita
-        if (m.is_me) {
-          wrap.appendChild(actions);
-          wrap.appendChild(bubble);
-        } else {
-          wrap.appendChild(bubble);
-          wrap.appendChild(actions);
-        }
-
-        box.appendChild(wrap);
-      });
-
-      if (forceScroll || wasAtBottom) box.scrollTop = box.scrollHeight;
-
-      if (lastId && lastId !== lastRenderedLastId) {
-        if (suppressHistorySound) {
-          lastSoundId = lastId;
-          lastRenderedLastId = lastId;
-          suppressHistorySound = false;
-          const now = Date.now();
-          if (now - lastMarkAt > 1500) { lastMarkAt = now; await markRead(currentOtherId); }
-          await loadContacts();
-          return;
-        }
-
-        if (lastMsg && !lastMsg.is_me && lastId !== lastSoundId) {
-          lastSoundId = lastId;
-          const senderName = lastMsg.sender_name ||
-            (contactsMap[currentOtherId]
-              ? (contactsMap[currentOtherId].nome || contactsMap[currentOtherId].username)
-              : "Contato");
-          notifyIncomingMessage({ messageId: lastId, senderName, text: lastMsg.texto || "", otherUserId: currentOtherId });
-        }
-
-        lastRenderedLastId = lastId;
+      if (lastRenderedLastId) {
         const now = Date.now();
         if (now - lastMarkAt > 1500) { lastMarkAt = now; await markRead(currentOtherId); }
         await loadContacts();
-      } else if (!lastId) {
-        // sem mensagens — garante que lastRenderedLastId fica zerado para nova conversa
-        lastRenderedLastId = 0;
       }
+    } finally { historyLoading = false; }
+  }
+
+  // Busca apenas mensagens novas (id > lastRenderedLastId) e as anexa, sem
+  // reconstruir o histórico inteiro a cada poll.
+  async function pollNewMessages() {
+    if (!currentOtherId || historyLoading) return;
+    historyLoading = true;
+
+    try {
+      const data = await apiGet(`/chat/history/${currentOtherId}/?after_id=${lastRenderedLastId}`);
+      if (data?.error) return;
+
+      const items = data.items || [];
+      if (!items.length) return;
+
+      const box = document.getElementById("chatMsgs");
+      if (!box) return;
+
+      const wasAtBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
+
+      items.forEach((m) => box.appendChild(renderMessageNode(m)));
+
+      if (wasAtBottom) box.scrollTop = box.scrollHeight;
+
+      const lastMsg = items[items.length - 1];
+      const lastId = Number(lastMsg.id || 0);
+
+      if (!suppressHistorySound && !lastMsg.is_me && lastId !== lastSoundId) {
+        lastSoundId = lastId;
+        const senderName = lastMsg.sender_name ||
+          (contactsMap[currentOtherId]
+            ? (contactsMap[currentOtherId].nome || contactsMap[currentOtherId].username)
+            : "Contato");
+        notifyIncomingMessage({ messageId: lastId, senderName, text: lastMsg.texto || "", otherUserId: currentOtherId });
+      } else {
+        lastSoundId = lastId;
+      }
+
+      lastRenderedLastId = lastId;
+      if (!oldestRenderedId) oldestRenderedId = Number(items[0].id || 0);
+
+      const now = Date.now();
+      if (now - lastMarkAt > 1500) { lastMarkAt = now; await markRead(currentOtherId); }
+      await loadContacts();
+    } finally { historyLoading = false; }
+  }
+
+  // Carrega mensagens mais antigas (scroll para o topo) e as insere no início.
+  async function loadOlderMessages() {
+    if (!currentOtherId || !hasMoreOlder || historyLoading || !oldestRenderedId) return;
+    historyLoading = true;
+
+    try {
+      const data = await apiGet(`/chat/history/${currentOtherId}/?before_id=${oldestRenderedId}&limit=${HISTORY_PAGE_SIZE}`);
+      if (data?.error) return;
+
+      const items = data.items || [];
+      hasMoreOlder = !!data.has_more;
+      if (!items.length) return;
+
+      const box = document.getElementById("chatMsgs");
+      if (!box) return;
+
+      const prevScrollHeight = box.scrollHeight;
+      const frag = document.createDocumentFragment();
+      items.forEach((m) => frag.appendChild(renderMessageNode(m)));
+      box.insertBefore(frag, box.firstChild);
+
+      oldestRenderedId = Number(items[0].id || 0);
+      box.scrollTop = box.scrollHeight - prevScrollHeight;
     } finally { historyLoading = false; }
   }
 
@@ -702,7 +761,7 @@ window.ChatUI = (() => {
       clearPastedImagePreview();
       clearReply();
 
-      await loadHistory(true);
+      await loadInitialHistory();
     } finally { sending = false; }
   }
 
@@ -725,6 +784,10 @@ window.ChatUI = (() => {
     // Delegação de eventos na área de mensagens
     const msgsBox = document.getElementById("chatMsgs");
     if (msgsBox) {
+      msgsBox.addEventListener("scroll", () => {
+        if (msgsBox.scrollTop < 80) loadOlderMessages().catch(() => {});
+      });
+
       msgsBox.addEventListener("click", (e) => {
         // Botões de ação (reply / react) e badges de reação
         const btn = e.target.closest("[data-action]");

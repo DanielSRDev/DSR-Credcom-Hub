@@ -40,6 +40,9 @@ class Message(models.Model):
 
     class Meta:
         ordering = ["criado_em"]
+        indexes = [
+            models.Index(fields=["conversation", "id"], name="chat_msg_conv_id_idx"),
+        ]
 
     def __str__(self):
         return f"Msg {self.id} ({self.sender_id})"

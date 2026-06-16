@@ -61,7 +61,7 @@
             <tbody>
               {% for r in repasse %}
               <tr>
-                <td><input class="form-check-input chk-repasse" type="checkbox" name="repasse_ids" value="{{ r.id }}"></td>
+                <td><input class="form-check-input chk-repasse js-row" type="checkbox" name="repasse_ids" value="{{ r.id }}" data-enviado="{{ r.enviado|yesno:'true,false' }}"></td>
                 <td>{{ r.aco_id }}</td>
                 <td>{{ r.pgo_data|date:"d/m/Y H:i" }}</td>
                 <td>{{ r.cliente_nome }}</td>
@@ -96,7 +96,7 @@
             <tbody>
               {% for r in repassevr %}
               <tr>
-                <td><input class="form-check-input chk-repassevr" type="checkbox" name="repassevr_ids" value="{{ r.id }}"></td>
+                <td><input class="form-check-input chk-repassevr js-row" type="checkbox" name="repassevr_ids" value="{{ r.id }}" data-enviado="{{ r.enviado|yesno:'true,false' }}"></td>
                 <td>{{ r.aco_id }}</td>
                 <td>{{ r.pgo_data|date:"d/m/Y H:i" }}</td>
                 <td>{{ r.cliente_nome }}</td>
@@ -131,7 +131,7 @@
             <tbody>
               {% for r in despesa %}
               <tr>
-                <td><input class="form-check-input chk-despesa" type="checkbox" name="despesa_ids" value="{{ r.id }}"></td>
+                <td><input class="form-check-input chk-despesa js-row" type="checkbox" name="despesa_ids" value="{{ r.id }}" data-enviado="{{ r.enviado|yesno:'true,false' }}"></td>
                 <td>{{ r.aco_id }}</td>
                 <td>{{ r.pgo_data|date:"d/m/Y H:i"|default:"-" }}</td>
                 <td>{{ r.cliente_nome|default:"-" }}</td>
@@ -166,7 +166,7 @@
             <tbody>
               {% for r in contareceber %}
               <tr>
-                <td><input class="form-check-input chk-cr" type="checkbox" name="contareceber_ids" value="{{ r.id }}"></td>
+                <td><input class="form-check-input chk-cr js-row" type="checkbox" name="contareceber_ids" value="{{ r.id }}" data-enviado="{{ r.enviado|yesno:'true,false' }}"></td>
                 <td>{{ r.co_id }}</td>
                 <td>{{ r.pgo_data|date:"d/m/Y H:i" }}</td>
                 <td>{{ r.cliente_nome }}</td>
@@ -201,7 +201,7 @@
             <tbody>
               {% for r in contapagar %}
               <tr>
-                <td><input class="form-check-input chk-cp" type="checkbox" name="contapagar_ids" value="{{ r.id }}"></td>
+                <td><input class="form-check-input chk-cp js-row" type="checkbox" name="contapagar_ids" value="{{ r.id }}" data-enviado="{{ r.enviado|yesno:'true,false' }}"></td>
                 <td>{{ r.co_id }}</td>
                 <td>{{ r.pgo_data|date:"d/m/Y H:i" }}</td>
                 <td>{{ r.cliente_nome }}</td>
@@ -226,11 +226,48 @@
         <input class="form-control w-auto" name="cat_receb" placeholder="categoryId RECEITA (opcional)">
         <input class="form-control w-auto" name="cat_pagar" placeholder="categoryId PAGAMENTO (opcional)">
         <input class="form-control w-auto" name="cc_padrao" placeholder="costCenterId (fallback)">
-        <button class="btn btn-success">Enviar remessa</button>
+
+        <!-- campos de reautorização para reenvio (preenchidos via modal) -->
+        <input type="hidden" name="reenvio_confirm" id="reenvio_confirm" value="">
+        <input type="hidden" name="reenvio_senha" id="reenvio_senha" value="">
+
+        <button type="submit" id="btn-enviar" class="btn btn-success">Enviar remessa</button>
       </div>
 
     </div>
   </form>
+
+  <!-- MODAL DE AUTORIZAÇÃO PARA REENVIO -->
+  <div class="modal fade" id="modalReenvio" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Atenção: itens já enviados</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+        </div>
+        <div class="modal-body">
+          <p>
+            Você selecionou registro(s) que já constam como <strong>enviado</strong>.
+            Reenviar pode duplicar lançamentos no Nibo.
+          </p>
+          <div class="form-check mb-3">
+            <input class="form-check-input" type="checkbox" id="modalConfirmCheck">
+            <label class="form-check-label" for="modalConfirmCheck">
+              Confirmo que desejo reenviar mesmo assim.
+            </label>
+          </div>
+          <div class="mb-3">
+            <label for="modalSenha" class="form-label">Senha de autorização (chefe do financeiro)</label>
+            <input type="password" class="form-control" id="modalSenha" autocomplete="off">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button type="button" class="btn btn-danger" id="modalConfirmarBtn">Confirmar e enviar</button>
+        </div>
+      </div>
+    </div>
+  </div>
 {% endblock %}
 
 {% block extra_js %}
@@ -250,6 +287,39 @@
       const group = master.getAttribute('data-group');
       document.querySelectorAll(group).forEach(chk => chk.checked = master.checked);
     });
+  });
+
+  // confirmação extra ao reenviar itens já marcados como enviado=True
+  const formEnvio       = document.getElementById('btn-enviar')?.closest('form');
+  const modalReenvioEl  = document.getElementById('modalReenvio');
+  const modalReenvio    = modalReenvioEl ? new bootstrap.Modal(modalReenvioEl) : null;
+  const inputConfirm    = document.getElementById('reenvio_confirm');
+  const inputSenha      = document.getElementById('reenvio_senha');
+
+  formEnvio?.addEventListener('submit', function(e){
+    const temJaEnviado = Array.from(document.querySelectorAll('.js-row'))
+      .some(chk => chk.checked && chk.dataset.enviado === 'true');
+
+    if (temJaEnviado && inputConfirm.value !== 'on') {
+      e.preventDefault();
+      modalReenvio?.show();
+    }
+  });
+
+  document.getElementById('modalConfirmarBtn')?.addEventListener('click', function(){
+    const check = document.getElementById('modalConfirmCheck');
+    const senha = document.getElementById('modalSenha');
+
+    if (!check.checked || !senha.value) {
+      alert('Marque a confirmação e informe a senha de autorização.');
+      return;
+    }
+
+    inputConfirm.value = 'on';
+    inputSenha.value   = senha.value;
+
+    modalReenvio?.hide();
+    formEnvio.submit();
   });
 </script>
 {% endblock %}
