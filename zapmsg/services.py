@@ -407,9 +407,16 @@ def register_incoming_message(conta, wa_id, texto, externo_id="", nome="", conta
     return msg, True
 
 
-def register_outgoing_message(conta, number, texto, externo_id="", raw_payload=None, wa_id="", tipo="texto", media_url=""):
-    target_wa_id = normalize_wa_id(wa_id) or normalize_wa_id(number)
-    contato, conversa = get_or_create_contact_and_conversation(conta=conta, wa_id=target_wa_id, nome="", contact_number=number)
+def register_outgoing_message(conta, number, texto, externo_id="", raw_payload=None, wa_id="", tipo="texto", media_url="", conversa=None):
+    # Quando a conversa de origem e conhecida (envio a partir do chat aberto),
+    # registramos a mensagem DIRETAMENTE nela, sem re-resolver o contato. Isso
+    # impede que uma resposta enviada na conversa X seja gravada na conversa Y
+    # por causa do match aproximado de telefone.
+    if conversa is not None:
+        contato = conversa.contato
+    else:
+        target_wa_id = normalize_wa_id(wa_id) or normalize_wa_id(number)
+        contato, conversa = get_or_create_contact_and_conversation(conta=conta, wa_id=target_wa_id, nome="", contact_number=number)
     if externo_id:
         existente = ZapMensagem.objects.filter(conversa=conversa, externo_id=externo_id).first()
         if existente:

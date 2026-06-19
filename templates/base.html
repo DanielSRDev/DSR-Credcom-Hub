@@ -158,14 +158,6 @@
                       {% endif %}
                     </div>
                     <div class="d-flex align-items-center gap-2">
-                      <form method="post" action="{% url 'core:jornal_curtir' post.id %}" class="jornal-like-form d-inline">
-                        {% csrf_token %}
-                        <input type="hidden" name="next" value="{{ request.get_full_path }}">
-                        <button type="submit" class="btn btn-sm {% if post.curtido_por_mim %}btn-primary{% else %}btn-outline-primary{% endif %}">
-                          👍 <span class="jornal-like-count">{{ post.likes_count }}</span>
-                        </button>
-                      </form>
-
                       {% if post.pode_editar %}
                         <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="collapse" data-bs-target="#jornalEdit{{ post.id }}">
                           ✏️ Editar
@@ -173,6 +165,8 @@
                       {% endif %}
                     </div>
                   </div>
+
+                  {% include "jornal/_reacoes.html" with tipo="post" alvo_id=post.id resumo=post.reacoes_resumo emojis=jornal_emojis %}
 
                   {% if post.pode_editar %}
                     <div class="collapse mt-2" id="jornalEdit{{ post.id }}">
@@ -203,6 +197,42 @@
                       </form>
                     </div>
                   {% endif %}
+
+                  <!-- Comentários -->
+                  <div class="mt-2 border-top pt-2">
+                    <button type="button" class="btn btn-sm btn-link p-0 text-decoration-none"
+                            data-bs-toggle="collapse" data-bs-target="#jornalComentarios{{ post.id }}">
+                      💬 Comentários (<span class="jornal-coment-count">{{ post.lista_comentarios|length }}</span>)
+                    </button>
+                    <div class="collapse mt-2" id="jornalComentarios{{ post.id }}">
+                      <div class="jornal-coment-list d-flex flex-column gap-2 mb-2">
+                        {% for c in post.lista_comentarios %}
+                          <div class="bg-body-secondary rounded p-2" data-coment-id="{{ c.id }}">
+                            <div class="d-flex justify-content-between align-items-start gap-2">
+                              <div class="small flex-grow-1" style="white-space: pre-wrap;">{{ c.texto }}</div>
+                              {% if c.pode_excluir %}
+                                <form method="post" action="{% url 'core:jornal_comentario_excluir' c.id %}" class="jornal-coment-del-form flex-shrink-0">
+                                  {% csrf_token %}
+                                  <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                                  <button type="submit" class="btn btn-sm btn-link text-danger p-0" title="Excluir comentário">🗑</button>
+                                </form>
+                              {% endif %}
+                            </div>
+                            <div class="small text-secondary mt-1">
+                              {% if c.user %}{{ c.user.username }}{% endif %} · {{ c.criado_em|date:"d/m/Y H:i" }}
+                            </div>
+                            {% include "jornal/_reacoes.html" with tipo="comentario" alvo_id=c.id resumo=c.reacoes_resumo emojis=jornal_emojis %}
+                          </div>
+                        {% endfor %}
+                      </div>
+                      <form method="post" action="{% url 'core:jornal_comentar' post.id %}" class="jornal-coment-form d-flex gap-2">
+                        {% csrf_token %}
+                        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                        <input type="text" name="texto" class="form-control form-control-sm" placeholder="Escreva um comentário..." required maxlength="2000">
+                        <button type="submit" class="btn btn-sm btn-primary">Comentar</button>
+                      </form>
+                    </div>
+                  </div>
                 </div>
               {% endfor %}
             </div>
@@ -231,6 +261,157 @@
       var modalImg = document.getElementById("jornalImgModalImg");
       modalImg.src = img.dataset.full;
       new bootstrap.Modal(document.getElementById("jornalImgModal")).show();
+    });
+  </script>
+
+  <!-- Comentários do Jornal (AJAX, sem recarregar a página) -->
+  <script>
+    function jornalCsrf(form) {
+      var el = form.querySelector("[name=csrfmiddlewaretoken]");
+      return el ? el.value : "";
+    }
+
+    function jornalEscape(s) {
+      var d = document.createElement("div");
+      d.textContent = s;
+      return d.innerHTML;
+    }
+
+    var JORNAL_CSRF = "{{ csrf_token }}";
+    var JORNAL_EMOJIS = {{ jornal_emojis|safe }};
+    // Modelos de URL com sentinelas (preservam o prefixo /core/ do app).
+    var JORNAL_URL_REAGIR = "{% url 'core:jornal_reagir' 'TIPO' 987654321 %}";
+    var JORNAL_URL_COMENT_DEL = "{% url 'core:jornal_comentario_excluir' 987654321 %}";
+
+    // Monta o HTML de uma barra de reações vazia (para itens criados via JS)
+    function jornalBarraReacoes(tipo, id) {
+      var picker = JORNAL_EMOJIS.map(function (e) {
+        return '<button type="button" class="btn btn-sm btn-light jornal-reacao-add px-2 py-1"' +
+               ' data-emoji="' + e + '" style="font-size:18px;line-height:1;">' + e + '</button>';
+      }).join("");
+      var url = JORNAL_URL_REAGIR.replace("TIPO", tipo).replace("987654321", id);
+      return '<div class="jornal-reacoes d-flex flex-wrap align-items-center gap-1 mt-2"' +
+             ' data-url="' + url + '">' +
+               '<div class="jornal-reacoes-chips d-flex flex-wrap gap-1"></div>' +
+               '<div class="dropdown">' +
+                 '<button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2" data-bs-toggle="dropdown" title="Adicionar reação">🙂<sup>+</sup></button>' +
+                 '<div class="dropdown-menu p-1"><div class="d-flex gap-1">' + picker + '</div></div>' +
+               '</div>' +
+             '</div>';
+    }
+
+    // Reagir (emoji) em post ou comentário
+    function jornalRenderChips(container, resumo) {
+      var chips = container.querySelector(".jornal-reacoes-chips");
+      if (!chips) return;
+      chips.innerHTML = (resumo || []).map(function (r) {
+        var cls = r.eu ? "btn-primary" : "btn-outline-secondary";
+        return '<button type="button" class="btn btn-sm py-0 px-2 jornal-reacao-chip ' + cls + '"' +
+               ' data-emoji="' + r.emoji + '" title="' + jornalEscape((r.quem || []).join(", ")) + '">' +
+               r.emoji + ' <span class="jornal-reacao-num">' + r.total + '</span></button>';
+      }).join("");
+    }
+
+    document.addEventListener("click", function (e) {
+      var btn = e.target.closest(".jornal-reacao-chip, .jornal-reacao-add");
+      if (!btn) return;
+      var container = btn.closest(".jornal-reacoes");
+      if (!container) return;
+
+      var emoji = btn.dataset.emoji;
+      var body = new FormData();
+      body.append("emoji", emoji);
+
+      fetch(container.dataset.url, {
+        method: "POST",
+        headers: {
+          "X-CSRFToken": JORNAL_CSRF,
+          "X-Requested-With": "XMLHttpRequest",
+        },
+        body: body,
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (!data || !data.ok) return;
+          jornalRenderChips(container, data.resumo);
+        });
+    });
+
+    // Enviar comentário
+    document.addEventListener("submit", function (e) {
+      var form = e.target.closest(".jornal-coment-form");
+      if (!form) return;
+      e.preventDefault();
+
+      var input = form.querySelector("[name=texto]");
+      var texto = (input.value || "").trim();
+      if (!texto) return;
+
+      var btn = form.querySelector("button[type=submit]");
+      if (btn) btn.disabled = true;
+
+      fetch(form.action, {
+        method: "POST",
+        headers: {
+          "X-CSRFToken": jornalCsrf(form),
+          "X-Requested-With": "XMLHttpRequest",
+        },
+        body: new FormData(form),
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (!data || !data.ok) return;
+          var wrap = form.closest(".collapse");
+          var list = wrap.querySelector(".jornal-coment-list");
+
+          var item = document.createElement("div");
+          item.className = "bg-body-secondary rounded p-2";
+          item.setAttribute("data-coment-id", data.id);
+          item.innerHTML =
+            '<div class="d-flex justify-content-between align-items-start gap-2">' +
+              '<div class="small flex-grow-1" style="white-space: pre-wrap;">' + jornalEscape(data.texto) + '</div>' +
+              '<form method="post" action="' + JORNAL_URL_COMENT_DEL.replace("987654321", data.id) + '" class="jornal-coment-del-form flex-shrink-0">' +
+                '<input type="hidden" name="csrfmiddlewaretoken" value="' + jornalCsrf(form) + '">' +
+                '<button type="submit" class="btn btn-sm btn-link text-danger p-0" title="Excluir comentário">🗑</button>' +
+              '</form>' +
+            '</div>' +
+            '<div class="small text-secondary mt-1">' + jornalEscape(data.autor) + ' · ' + data.criado_em + '</div>' +
+            jornalBarraReacoes("comentario", data.id);
+          list.appendChild(item);
+
+          input.value = "";
+          var counter = wrap.closest(".border-top").querySelector(".jornal-coment-count");
+          if (counter && typeof data.total === "number") counter.textContent = data.total;
+        })
+        .finally(function () { if (btn) btn.disabled = false; });
+    });
+
+    // Excluir comentário
+    document.addEventListener("submit", function (e) {
+      var form = e.target.closest(".jornal-coment-del-form");
+      if (!form) return;
+      e.preventDefault();
+
+      fetch(form.action, {
+        method: "POST",
+        headers: {
+          "X-CSRFToken": jornalCsrf(form),
+          "X-Requested-With": "XMLHttpRequest",
+        },
+        body: new FormData(form),
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (!data || !data.ok) return;
+          var item = form.closest("[data-coment-id]");
+          var collapse = form.closest(".collapse");
+          if (item) item.remove();
+          var counter = collapse.closest(".border-top").querySelector(".jornal-coment-count");
+          if (counter) {
+            var n = parseInt(counter.textContent, 10) || 0;
+            counter.textContent = Math.max(0, n - 1);
+          }
+        });
     });
   </script>
 

@@ -1,6 +1,15 @@
 {% extends "base.html" %}
 {% block content %}
 
+{% if messages %}
+  {% for message in messages %}
+    <div class="alert alert-{% if message.tags == 'error' %}danger{% else %}{{ message.tags|default:'info' }}{% endif %} alert-dismissible fade show py-2" role="alert">
+      {{ message }}
+      <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+  {% endfor %}
+{% endif %}
+
 <div class="card shadow-sm" style="border-radius:16px;">
   <div class="card-body p-4">
 
@@ -132,8 +141,10 @@
         {% endif %}
       {% endif %}
 
-      {% if pode_finalizar %}
-        <form method="post" action="{% url 'operacao:toggle' tarefa.id %}">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}"><button class="btn btn-outline-primary" type="submit">{% if tarefa.status == 'feita' %}Reabrir{% else %}✅ Finalizar{% endif %}</button></form>
+      {% if tarefa.status == 'feita' %}
+        <button class="btn btn-outline-secondary" type="button" data-bs-toggle="modal" data-bs-target="#modalReabrirDetalhe">🔒 Reabrir</button>
+      {% elif pode_finalizar %}
+        <form method="post" action="{% url 'operacao:toggle' tarefa.id %}">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}"><button class="btn btn-outline-primary" type="submit">✅ Finalizar</button></form>
       {% endif %}
     </div>
 
@@ -159,6 +170,33 @@
         <div class="modal-footer">
           <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
           <button type="submit" class="btn btn-warning">Devolver para o executor</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{# Modal reabertura no detalhe — exige senha admin #}
+{% if tarefa.status == 'feita' %}
+<div class="modal fade" id="modalReabrirDetalhe" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">🔒 Reabrir card finalizado</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <form method="post" action="{% url 'operacao:reabrir' tarefa.id %}">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+        <div class="modal-body">
+          <p class="text-secondary small mb-3"><b>{{ tarefa.codigo }}</b> — {{ tarefa.titulo }}</p>
+          <label class="form-label fw-semibold">Senha de reabertura <span class="text-danger">*</span></label>
+          <input type="password" name="senha" class="form-control" autocomplete="off" required>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-secondary">Reabrir</button>
         </div>
       </form>
     </div>

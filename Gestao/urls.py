@@ -16,6 +16,7 @@ urlpatterns = [
     path("executando/<int:pk>/",      views.tarefa_toggle_executando,  name="executando"),
     path("executado/<int:pk>/",       views.tarefa_marcar_executado,   name="executado"),
     path("toggle/<int:pk>/",          views.tarefa_toggle_status,      name="toggle"),
+    path("reabrir/<int:pk>/",         views.reabrir,                   name="reabrir"),
 
     # NOVO — fluxo de validação/pendência
     path("devolver/<int:pk>/",        views.devolver_pendencia,        name="devolver"),

@@ -7,7 +7,7 @@ from django.views.decorators.http import require_POST
 
 from django.utils import timezone
 
-from .models import AnotacaoPessoal, JornalPost, JornalLeitura, JornalLike
+from .models import AnotacaoPessoal, JornalPost, JornalLeitura, JornalComentario, JornalReacao
 
 
 @login_required
@@ -213,22 +213,107 @@ def jornal_editar(request, pk):
     return _voltar(request)
 
 
+def _resumo_reacoes(reacoes, user):
+    """
+    Agrupa um iterável de ``JornalReacao`` (já carregado, idealmente com
+    ``select_related('user')``) em uma lista pronta para o template/JSON:
+
+        [{"emoji": "👍", "total": 3, "eu": True, "quem": ["ana", "bia", ...]}, ...]
+
+    Ordenada pela paleta de ``JornalReacao.EMOJIS``.
+    """
+    from collections import defaultdict
+
+    grupos = defaultdict(list)
+    for r in reacoes:
+        grupos[r.emoji].append(r)
+
+    ordem = {e: i for i, e in enumerate(JornalReacao.EMOJIS)}
+    resumo = []
+    for emoji in sorted(grupos, key=lambda e: ordem.get(e, 999)):
+        rs = grupos[emoji]
+        resumo.append({
+            "emoji": emoji,
+            "total": len(rs),
+            "eu": any(r.user_id == user.id for r in rs),
+            "quem": [r.user.username for r in rs if r.user_id],
+        })
+    return resumo
+
+
 @login_required
 @require_POST
-def jornal_curtir(request, pk):
-    post = get_object_or_404(JornalPost, pk=pk)
+def jornal_reagir(request, tipo, pk):
+    emoji = request.POST.get("emoji", "").strip()
+    if emoji not in JornalReacao.EMOJIS:
+        return JsonResponse({"ok": False, "erro": "Reação inválida."}, status=400)
 
-    like, criado = JornalLike.objects.get_or_create(post=post, user=request.user)
-    if not criado:
-        like.delete()
-        liked = False
+    if tipo == "post":
+        alvo = get_object_or_404(JornalPost, pk=pk)
+        filtro = {"post": alvo}
+    elif tipo == "comentario":
+        alvo = get_object_or_404(JornalComentario, pk=pk)
+        filtro = {"comentario": alvo}
     else:
-        liked = True
+        return JsonResponse({"ok": False, "erro": "Alvo inválido."}, status=400)
 
-    total = post.likes.count()
+    reacao, criada = JornalReacao.objects.get_or_create(
+        user=request.user, emoji=emoji, **filtro
+    )
+    if not criada:
+        reacao.delete()
+
+    reacoes = list(alvo.reacoes.select_related("user").all())
+    resumo = _resumo_reacoes(reacoes, request.user)
 
     if request.headers.get("x-requested-with") == "XMLHttpRequest":
-        return JsonResponse({"ok": True, "liked": liked, "total": total})
+        return JsonResponse({"ok": True, "resumo": resumo})
+
+    return _voltar(request)
+
+
+@login_required
+@require_POST
+def jornal_comentar(request, pk):
+    post = get_object_or_404(JornalPost, pk=pk)
+
+    texto = request.POST.get("texto", "").strip()
+    if not texto:
+        messages.error(request, "Escreva algo para comentar.")
+        return _voltar(request)
+
+    comentario = JornalComentario.objects.create(
+        post=post,
+        user=request.user,
+        texto=texto,
+    )
+
+    if request.headers.get("x-requested-with") == "XMLHttpRequest":
+        return JsonResponse({
+            "ok": True,
+            "id": comentario.id,
+            "autor": request.user.username,
+            "texto": comentario.texto,
+            "criado_em": comentario.criado_em.strftime("%d/%m/%Y %H:%M"),
+            "total": post.comentarios.count(),
+        })
+
+    return _voltar(request)
+
+
+@login_required
+@require_POST
+def jornal_comentario_excluir(request, pk):
+    comentario = get_object_or_404(JornalComentario, pk=pk)
+
+    if comentario.user_id != request.user.id and not request.user.is_staff:
+        messages.error(request, "Você não pode excluir este comentário.")
+        return _voltar(request)
+
+    comentario.delete()
+
+    if request.headers.get("x-requested-with") == "XMLHttpRequest":
+        return JsonResponse({"ok": True})
 
     return _voltar(request)
 

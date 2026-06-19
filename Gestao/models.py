@@ -67,6 +67,9 @@ class Tarefa(models.Model):
     pendente_em   = models.DateTimeField(null=True, blank=True)   # NOVO
     finalizado_em = models.DateTimeField(null=True, blank=True)
 
+    # Marca cards fechados pela varredura automática (prazo de validação estourado)
+    finalizado_automaticamente = models.BooleanField(default=False)
+
     # ------------------------------------------------------------------
     # Soft delete
     # ------------------------------------------------------------------

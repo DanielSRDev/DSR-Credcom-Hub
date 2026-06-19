@@ -16,6 +16,7 @@ urlpatterns = [
     path("executando/<int:tarefa_id>/",   views.marcar_executando,   name="executando"),
     path("executado/<int:tarefa_id>/",    views.marcar_executado,    name="executado"),
     path("toggle/<int:tarefa_id>/",       views.finalizar_reabrir,   name="toggle"),
+    path("reabrir/<int:tarefa_id>/",      views.reabrir,             name="reabrir"),
     path("devolver/<int:tarefa_id>/",            views.devolver_pendencia,   name="devolver"),
     path("confirmar-devolucao/<int:tarefa_id>/", views.confirmar_devolucao,  name="confirmar_devolucao"),
     path("prioridade/<int:tarefa_id>/",   views.toggle_prioridade,   name="prioridade"),

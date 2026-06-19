@@ -1,11 +1,20 @@
 import logging
 
+from django import forms
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.contrib.auth.models import User
 from django.utils.html import format_html
 
-from .models import AnotacaoPessoal, JornalPost, JornalLike, PerfilUsuario, UsuarioRestricaoModulo
+from .models import (
+    AnotacaoPessoal,
+    ConfiguracaoSeguranca,
+    JornalPost,
+    JornalReacao,
+    JornalComentario,
+    PerfilUsuario,
+    UsuarioRestricaoModulo,
+)
 
 logger = logging.getLogger("core.admin")
 
@@ -139,10 +148,19 @@ class JornalPostAdmin(admin.ModelAdmin):
     ordering = ("-criado_em",)
 
 
-@admin.register(JornalLike)
-class JornalLikeAdmin(admin.ModelAdmin):
-    list_display = ("post", "user", "criado_em")
-    search_fields = ("post__titulo", "user__username")
+@admin.register(JornalReacao)
+class JornalReacaoAdmin(admin.ModelAdmin):
+    list_display = ("emoji", "post", "comentario", "user", "criado_em")
+    list_filter = ("emoji",)
+    search_fields = ("post__titulo", "comentario__texto", "user__username")
+    autocomplete_fields = ("post", "comentario", "user")
+
+
+@admin.register(JornalComentario)
+class JornalComentarioAdmin(admin.ModelAdmin):
+    list_display = ("post", "user", "texto", "criado_em")
+    search_fields = ("post__titulo", "user__username", "texto")
+    readonly_fields = ("criado_em",)
     autocomplete_fields = ("post", "user")
 
 
@@ -152,3 +170,45 @@ class AnotacaoPessoalAdmin(admin.ModelAdmin):
     list_filter = ("concluida", "fixada", "cor")
     search_fields = ("user__username", "texto")
     autocomplete_fields = ("user",)
+
+
+# ── ConfiguracaoSeguranca (singleton) ─────────────────────────────────────────
+
+class ConfiguracaoSegurancaForm(forms.ModelForm):
+    nova_senha = forms.CharField(
+        label="Nova senha de reabertura",
+        widget=forms.PasswordInput(render_value=False),
+        required=False,
+        help_text="Preencha apenas para definir/alterar. Deixe em branco para manter a atual.",
+    )
+
+    class Meta:
+        model = ConfiguracaoSeguranca
+        fields = ("prazo_validacao_dias", "nova_senha")
+
+    def save(self, commit=True):
+        obj = super().save(commit=False)
+        nova = self.cleaned_data.get("nova_senha")
+        if nova:
+            obj.set_senha(nova)
+        if commit:
+            obj.save()
+        return obj
+
+
+@admin.register(ConfiguracaoSeguranca)
+class ConfiguracaoSegurancaAdmin(admin.ModelAdmin):
+    form = ConfiguracaoSegurancaForm
+    list_display = ("__str__", "prazo_validacao_dias", "senha_definida", "atualizado_em")
+    readonly_fields = ("atualizado_em",)
+
+    @admin.display(description="Senha definida", boolean=True)
+    def senha_definida(self, obj):
+        return bool(obj.senha_reabertura)
+
+    def has_add_permission(self, request):
+        # Singleton: só permite adicionar se ainda não existe registro.
+        return not ConfiguracaoSeguranca.objects.exists()
+
+    def has_delete_permission(self, request, obj=None):
+        return False

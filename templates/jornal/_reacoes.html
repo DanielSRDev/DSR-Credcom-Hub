@@ -1,0 +1,35 @@
+{% comment %}
+Barra de reações reutilizável do Jornal.
+Parâmetros esperados no {% include %}:
+  tipo     -> "post" ou "comentario"
+  alvo_id  -> id do post ou comentário
+  resumo   -> lista [{emoji, total, eu, quem}]
+  emojis   -> paleta completa (jornal_emojis)
+{% endcomment %}
+<div class="jornal-reacoes d-flex flex-wrap align-items-center gap-1 mt-2"
+     data-url="{% url 'core:jornal_reagir' tipo alvo_id %}">
+  <div class="jornal-reacoes-chips d-flex flex-wrap gap-1">
+    {% for r in resumo %}
+      <button type="button"
+              class="btn btn-sm py-0 px-2 jornal-reacao-chip {% if r.eu %}btn-primary{% else %}btn-outline-secondary{% endif %}"
+              data-emoji="{{ r.emoji }}"
+              title="{{ r.quem|join:', ' }}">
+        {{ r.emoji }} <span class="jornal-reacao-num">{{ r.total }}</span>
+      </button>
+    {% endfor %}
+  </div>
+  <div class="dropdown">
+    <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2"
+            data-bs-toggle="dropdown" title="Adicionar reação">
+      🙂<sup>+</sup>
+    </button>
+    <div class="dropdown-menu p-1">
+      <div class="d-flex gap-1">
+        {% for e in emojis %}
+          <button type="button" class="btn btn-sm btn-light jornal-reacao-add px-2 py-1"
+                  data-emoji="{{ e }}" style="font-size:18px;line-height:1;">{{ e }}</button>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</div>

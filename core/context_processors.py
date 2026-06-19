@@ -142,26 +142,48 @@ def jornal_ctx(request) -> Dict[str, object]:
     if not user or not user.is_authenticated:
         return {"jornal_posts": [], "jornal_tem_novidade": False}
 
-    from core.models import JornalPost, JornalLeitura, JornalLike
+    from collections import defaultdict
 
-    posts = list(JornalPost.objects.all()[:20])
+    from core.models import JornalPost, JornalLeitura, JornalReacao
+    from core.views import _resumo_reacoes
+
+    posts = list(
+        JornalPost.objects.prefetch_related("comentarios__user").all()[:20]
+    )
     ultimo = posts[0] if posts else None
 
     leitura, _ = JornalLeitura.objects.get_or_create(user=user)
     tem_novidade = bool(ultimo and leitura.ultimo_post_visto_id != ultimo.id)
 
-    curtidos = set(
-        JornalLike.objects.filter(user=user, post_id__in=[p.id for p in posts])
-        .values_list("post_id", flat=True)
-    )
+    # Coleta todos os comentários visíveis e todas as reações (posts +
+    # comentários) em poucas queries, depois agrupa em memória.
+    post_ids = [p.id for p in posts]
+    comentarios_por_post = {p.id: list(p.comentarios.all()) for p in posts}
+    coment_ids = [c.id for cs in comentarios_por_post.values() for c in cs]
+
+    reacoes_post = defaultdict(list)
+    for r in JornalReacao.objects.filter(post_id__in=post_ids).select_related("user"):
+        reacoes_post[r.post_id].append(r)
+
+    reacoes_coment = defaultdict(list)
+    if coment_ids:
+        for r in JornalReacao.objects.filter(
+            comentario_id__in=coment_ids
+        ).select_related("user"):
+            reacoes_coment[r.comentario_id].append(r)
+
     for post in posts:
-        post.likes_count = post.likes.count()
-        post.curtido_por_mim = post.id in curtidos
         post.pode_editar = post.autor_id == user.id or user.is_staff
+        post.reacoes_resumo = _resumo_reacoes(reacoes_post.get(post.id, []), user)
+        post.lista_comentarios = comentarios_por_post[post.id]
+        for c in post.lista_comentarios:
+            c.pode_excluir = c.user_id == user.id or user.is_staff
+            c.reacoes_resumo = _resumo_reacoes(reacoes_coment.get(c.id, []), user)
 
     return {
         "jornal_posts": posts,
         "jornal_tem_novidade": tem_novidade,
+        "jornal_emojis": JornalReacao.EMOJIS,
     }
 
 

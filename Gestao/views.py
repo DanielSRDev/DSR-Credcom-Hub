@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 from datetime import timedelta
 
+from django.contrib import messages
 from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
 from django.db.models import Count, Q
@@ -12,6 +13,8 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST, require_GET
 
+from core.models import ConfiguracaoSeguranca
+from core.services import finalizar_executados_vencidos
 from .forms import TarefaForm, ComentarioForm, AnexoForm, DevolucaoForm
 from .models import Tarefa, Comentario, Anexo
 
@@ -177,6 +180,9 @@ def _build_base_filtrado(request):
 def quadro(request):
     if not tem_acesso_gestao(request.user):
         return HttpResponseForbidden("Sem acesso ao módulo Gestão.")
+
+    # Fecha automaticamente cards EXECUTADO que estouraram o prazo de validação.
+    finalizar_executados_vencidos(Tarefa, Comentario)
 
     f_data_ini = request.GET.get("data_ini") or ""
     f_data_fim = request.GET.get("data_fim") or ""
@@ -528,17 +534,70 @@ def confirmar_devolucao(request, pk: int):
 @login_required
 @require_POST
 def toggle_finalizado(request, pk: int):
+    """
+    Finaliza uma tarefa (criador ou gestor).
+    Reabrir card já finalizado NÃO é feito por aqui — exige senha (view `reabrir`).
+    """
     tarefa = get_object_or_404(Tarefa, pk=pk)
     if not pode_finalizar(request.user, tarefa):
-        return HttpResponseForbidden("Somente o criador (ou gestor) pode finalizar/reabrir.")
+        return HttpResponseForbidden("Somente o criador (ou gestor) pode finalizar.")
 
     if tarefa.status == "feita":
-        tarefa.status        = "aberta"
-        tarefa.finalizado_em = None
-    else:
-        tarefa.status        = "feita"
-        tarefa.finalizado_em = timezone.now()
-    tarefa.save(update_fields=["status", "finalizado_em"])
+        messages.info(request, "Tarefa já finalizada. Para reabrir, use a senha de reabertura.")
+        return redirect(_next_or(request, "/gestao/"))
+
+    tarefa.status                     = "feita"
+    tarefa.finalizado_em              = timezone.now()
+    tarefa.finalizado_automaticamente = False
+    tarefa.save(update_fields=["status", "finalizado_em", "finalizado_automaticamente"])
+    return redirect(_next_or(request, "/gestao/"))
+
+
+@login_required
+@require_POST
+def reabrir(request, pk: int):
+    """
+    Reabre um card finalizado mediante senha admin (ConfiguracaoSeguranca).
+    Não depende de grupo — qualquer pessoa que veja o card e saiba a senha pode
+    reabri-lo. O card volta para ABERTA, zerando os carimbos de execução.
+    """
+    tarefa = get_object_or_404(Tarefa, pk=pk)
+    if not pode_ver_tarefa(request.user, tarefa):
+        return HttpResponseForbidden("Sem permissão.")
+
+    if tarefa.status != "feita":
+        messages.error(request, "Só é possível reabrir tarefas finalizadas.")
+        return redirect(_next_or(request, "/gestao/"))
+
+    senha = request.POST.get("senha") or ""
+    config = ConfiguracaoSeguranca.get_solo()
+
+    if not config.senha_reabertura:
+        messages.error(request, "Senha de reabertura não configurada no admin.")
+        return redirect(_next_or(request, "/gestao/"))
+
+    if not config.check_senha(senha):
+        messages.error(request, "Senha incorreta. O card continua finalizado.")
+        return redirect(_next_or(request, "/gestao/"))
+
+    tarefa.status                     = "aberta"
+    tarefa.iniciado_em                = None
+    tarefa.executado_em               = None
+    tarefa.pendente_em                = None
+    tarefa.finalizado_em              = None
+    tarefa.executor                   = None
+    tarefa.finalizado_automaticamente = False
+    tarefa.save(update_fields=[
+        "status", "iniciado_em", "executado_em", "pendente_em",
+        "finalizado_em", "executor", "finalizado_automaticamente",
+    ])
+
+    Comentario.objects.create(
+        tarefa=tarefa,
+        autor=request.user,
+        texto=f"Card reaberto por {request.user.username} mediante senha de reabertura.",
+    )
+    messages.success(request, f"Card {tarefa.codigo} reaberto.")
     return redirect(_next_or(request, "/gestao/"))
 
 
@@ -594,6 +653,8 @@ def reordenar(request):
 def partial_kpis(request):
     if not tem_acesso_gestao(request.user):
         return HttpResponseForbidden("Sem acesso ao módulo Gestão.")
+
+    finalizar_executados_vencidos(Tarefa, Comentario)
 
     base  = _build_base_filtrado(request)
     agora = timezone.now()

@@ -190,3 +190,14 @@ SESSION_SAVE_EVERY_REQUEST = True
 ZAPMSG_CONNECTOR_URL = os.getenv("ZAPMSG_CONNECTOR_URL", "http://127.0.0.1:3010")
 ZAPMSG_WEBHOOK_TOKEN = os.getenv("ZAPMSG_WEBHOOK_TOKEN", "dsr_zapmsg_2026")
 
+# Mídia do ZapMsg trafega em base64 (webhook de entrada e upload de saída).
+# O padrão do Django (2.5MB) corta arquivos maiores silenciosamente, então
+# alinhamos com o limite de 80MB do connector.
+DATA_UPLOAD_MAX_MEMORY_SIZE = 80 * 1024 * 1024  # 80 MB
+FILE_UPLOAD_MAX_MEMORY_SIZE = 80 * 1024 * 1024  # 80 MB
+
+# Envio automático de remessa ao Nibo (dia útil anterior).
+# Desligado por padrão: ligue só depois de validar com --dry-run no servidor.
+NIBO_AUTO_ENVIO_ATIVO = os.getenv("NIBO_AUTO_ENVIO_ATIVO", "0") == "1"
+NIBO_AUTO_ENVIO_HORA = int(os.getenv("NIBO_AUTO_ENVIO_HORA", "9"))  # hora (0-23)
+

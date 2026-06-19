@@ -21,7 +21,7 @@ from .models import (
     SupervisorPainel,
 )
 from .services import eh_status_pago, sincronizar_painel_operacao, sincronizar_relatorio_geral
-from .services_acompanhamento import montar_acompanhamento_geral
+from .services_acompanhamento import linked_credores_ids, montar_acompanhamento_geral
 
 
 
@@ -273,6 +273,11 @@ def aplicar_filtros_painel(request):
     form = PainelOperacaoFiltroForm(dados_iniciais or None)
 
     qs = PainelOperacaoRegistro.objects.all().order_by("-data_emissao", "-aco_id")
+
+    # Mesma regra do Acompanhamento Geral: considerar apenas carteiras
+    # cadastradas em CarteiraSupervisor (ativa). Carteiras "fora do padrao"
+    # nao entram no painel nem nos totais.
+    qs = qs.filter(cre_id__in=linked_credores_ids())
 
     data_ini = None
     data_fim = None

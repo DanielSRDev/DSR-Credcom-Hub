@@ -14,7 +14,7 @@ def can_monitor_all(user) -> bool:
         return False
     if user.is_superuser:
         return True
-    return ChatMonitorConfig.objects.filter(user=user, can_monitor=True).exists()
+    return ChatMonitorConfig.objects.filter(user=user, monitorado=True).exists()
 
 
 def is_operacao_supervisor(user) -> bool:

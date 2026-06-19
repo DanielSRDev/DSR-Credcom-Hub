@@ -70,7 +70,7 @@ def can_monitor_chat(user) -> bool:
     if user.is_superuser or user.is_staff:
         return True
     cfg = getattr(user, "chat_monitor_config", None)
-    return bool(cfg and cfg.can_monitor)
+    return bool(cfg and cfg.monitorado)
 
 
 def get_actor_user(request):

@@ -16,6 +16,7 @@ from .services import (
     get_or_create_conta,
     get_or_create_contact_and_conversation,
     get_session_status,
+    normalize_wa_id,
     register_incoming_message,
     register_outgoing_message,
     resolve_contact_wa_id,
@@ -185,7 +186,7 @@ def api_conversas(request):
             "numero": c.contato.numero,
             "wa_id": c.contato.wa_id,
             "ultima_mensagem": c.ultima_mensagem or "",
-            "ultima_mensagem_em": c.ultima_mensagem_em.strftime("%d/%m/%Y %H:%M") if c.ultima_mensagem_em else "",
+            "ultima_mensagem_em": timezone.localtime(c.ultima_mensagem_em).strftime("%d/%m/%Y %H:%M") if c.ultima_mensagem_em else "",
             "nao_lidas": c.nao_lidas,
             "fixada": c.fixada,
             "status_atendimento": c.status_atendimento,
@@ -207,7 +208,11 @@ def api_mensagens_conversa(request, conversa_id):
     if not _is_valid_real_contact(conversa.contato.wa_id):
         return JsonResponse({"ok": False, "erro": "Conversa inválida"}, status=404)
 
-    mensagens = conversa.mensagens.order_by("enviada_em", "id")
+    # Ordena pela ordem de insercao (id), que reflete a sequencia real em que
+    # as mensagens foram observadas pelo sistema. Isso evita que diferencas de
+    # relogio entre o servidor (mensagens enviadas) e o WhatsApp (recebidas)
+    # embaralhem a conversa.
+    mensagens = conversa.mensagens.order_by("id")
 
     data = []
     for m in mensagens:
@@ -222,7 +227,7 @@ def api_mensagens_conversa(request, conversa_id):
             "media_url": m.media_url or "",
             "filename": raw.get("filename", "") or raw.get("fileName", "") or "",
             "mimetype": raw.get("mimetype", "") or "",
-            "enviada_em": m.enviada_em.strftime("%d/%m/%Y %H:%M"),
+            "enviada_em": timezone.localtime(m.enviada_em).strftime("%d/%m/%Y %H:%M"),
             "lida": m.lida,
         })
 
@@ -282,6 +287,7 @@ def api_enviar_mensagem_conversa(request, conversa_id):
                 wa_id=data.get("to") or conversa.contato.wa_id,
                 tipo=data.get("tipo") or "arquivo",
                 media_url=data.get("media_data_url", "") or "",
+                conversa=conversa,
             )
         else:
             data = send_message(
@@ -297,6 +303,7 @@ def api_enviar_mensagem_conversa(request, conversa_id):
                 externo_id=data.get("message_id", ""),
                 raw_payload=data,
                 wa_id=data.get("to") or conversa.contato.wa_id,
+                conversa=conversa,
             )
 
         return JsonResponse({
@@ -307,7 +314,7 @@ def api_enviar_mensagem_conversa(request, conversa_id):
                 "direction": msg.direction,
                 "tipo": msg.tipo,
                 "status_envio": msg.status_envio,
-                "enviada_em": msg.enviada_em.strftime("%d/%m/%Y %H:%M"),
+                "enviada_em": timezone.localtime(msg.enviada_em).strftime("%d/%m/%Y %H:%M"),
             }
         })
     except ZapConnectorError as e:
@@ -352,11 +359,29 @@ def api_nova_conversa(request):
         return JsonResponse({"ok": False, "erro": "Método inválido"}, status=405)
 
     _, conta = _get_target_conta(request)
+
     numero = (request.POST.get("numero") or "").strip()
     nome = (request.POST.get("nome") or "").strip()
 
+    # O frontend envia o corpo em JSON; request.POST so traz dados de formulario,
+    # entao precisamos ler do corpo JSON quando for o caso.
+    if not numero and "application/json" in (request.content_type or ""):
+        try:
+            body = json.loads(request.body.decode("utf-8") or "{}")
+            numero = str(body.get("numero") or "").strip()
+            if not nome:
+                nome = str(body.get("nome") or "").strip()
+        except Exception:
+            pass
+
     if not numero:
         return JsonResponse({"ok": False, "erro": "Número é obrigatório"}, status=400)
+
+    if not normalize_wa_id(numero):
+        return JsonResponse({
+            "ok": False,
+            "erro": "Número inválido. Use DDD + número (ex: 62 99999-9999).",
+        }, status=400)
 
     contato, conversa = get_or_create_contact_and_conversation(
         conta=conta,

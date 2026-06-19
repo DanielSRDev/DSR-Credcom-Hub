@@ -12,6 +12,8 @@ urlpatterns = [
 
     path("jornal/criar/", views.jornal_criar, name="jornal_criar"),
     path("jornal/<int:pk>/editar/", views.jornal_editar, name="jornal_editar"),
-    path("jornal/<int:pk>/curtir/", views.jornal_curtir, name="jornal_curtir"),
+    path("jornal/<str:tipo>/<int:pk>/reagir/", views.jornal_reagir, name="jornal_reagir"),
+    path("jornal/<int:pk>/comentar/", views.jornal_comentar, name="jornal_comentar"),
+    path("jornal/comentario/<int:pk>/excluir/", views.jornal_comentario_excluir, name="jornal_comentario_excluir"),
     path("jornal/marcar-lido/", views.jornal_marcar_lido, name="jornal_marcar_lido"),
 ]

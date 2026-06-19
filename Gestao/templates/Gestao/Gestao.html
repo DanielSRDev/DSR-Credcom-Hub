@@ -5,6 +5,17 @@
 <link rel="stylesheet" href="{% static 'css/Gestao.css' %}">
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
 
+{% if messages %}
+  <div class="px-2 pt-2">
+    {% for message in messages %}
+      <div class="alert alert-{% if message.tags == 'error' %}danger{% else %}{{ message.tags|default:'info' }}{% endif %} alert-dismissible fade show py-2 mb-2" role="alert">
+        {{ message }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+      </div>
+    {% endfor %}
+  </div>
+{% endif %}
+
 <div class="op-layout">
 
   {# ==================== SIDEBAR ==================== #}
@@ -329,7 +340,7 @@
                 <div class="card-titulo">{% if t.prioridade %}<span class="badge-prio">prio</span> {% endif %}{{ t.titulo }}</div>
                 {% if t.descricao %}<div class="card-desc">{{ t.descricao }}</div>{% endif %}
                 <div class="card-meta">
-                  <div>Finalizado: <b>{{ t.finalizado_em|date:"d/m/Y H:i"|default:"-" }}</b></div>
+                  <div>Finalizado: <b>{{ t.finalizado_em|date:"d/m/Y H:i"|default:"-" }}</b>{% if t.finalizado_automaticamente %} <span class="badge bg-secondary" title="Finalizado automaticamente por falta de validação">🤖 auto</span>{% endif %}</div>
                   <div>Para: <b>{{ t.atribuida_para.username }}</b></div>
                 </div>
               </div>
@@ -341,9 +352,32 @@
                   {% if pode_deletar %}<a class="card-icon-btn" href="{% url 'gestao:deletar' t.id %}?next={{ request.get_full_path|urlencode }}" title="Deletar">🗑️</a>{% endif %}
                 </div>
                 <div class="card-actions">
-                  {% if request.user.id == t.criada_por_id or pode_editar %}
-                    <form method="post" action="{% url 'gestao:toggle' t.id %}">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}"><button class="btn btn-sm btn-outline-secondary" type="submit">Reabrir</button></form>
-                  {% endif %}
+                  <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="modal" data-bs-target="#modalReabrir{{ t.id }}">🔒 Reabrir</button>
+                </div>
+              </div>
+            </div>
+
+            {# Modal reabertura — exige senha admin #}
+            <div class="modal fade" id="modalReabrir{{ t.id }}" tabindex="-1">
+              <div class="modal-dialog">
+                <div class="modal-content">
+                  <div class="modal-header">
+                    <h5 class="modal-title">🔒 Reabrir card finalizado</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                  </div>
+                  <form method="post" action="{% url 'gestao:reabrir' t.id %}">
+                    {% csrf_token %}
+                    <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                    <div class="modal-body">
+                      <p class="text-secondary small mb-3"><b>{{ t.codigo }}</b> — {{ t.titulo }}</p>
+                      <label class="form-label fw-semibold">Senha de reabertura <span class="text-danger">*</span></label>
+                      <input type="password" name="senha" class="form-control" autocomplete="off" required>
+                    </div>
+                    <div class="modal-footer">
+                      <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+                      <button type="submit" class="btn btn-secondary">Reabrir</button>
+                    </div>
+                  </form>
                 </div>
               </div>
             </div>

@@ -1,12 +1,59 @@
 import logging
 
 from django.conf import settings
+from django.contrib.auth.hashers import check_password, make_password
 from django.core.validators import FileExtensionValidator
 from django.db import models
 from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
 
 logger = logging.getLogger("core.models")
+
+
+class ConfiguracaoSeguranca(models.Model):
+    """
+    Configuração única (singleton) compartilhada pelos módulos Operação e Gestão.
+
+    - senha_reabertura: hash da senha exigida para reabrir um card finalizado.
+      Reabrir não depende mais de grupo — qualquer pessoa que veja o card e
+      saiba esta senha pode reabri-lo.
+    - prazo_validacao_dias: prazo (em dias) que o validador tem, a partir de
+      `executado_em`, para validar um card EXECUTADO. Esgotado o prazo, o card
+      é finalizado automaticamente.
+    """
+
+    senha_reabertura = models.CharField(
+        max_length=255,
+        blank=True,
+        verbose_name="Senha de reabertura (hash)",
+        help_text="Não editar aqui — defina pela caixa 'Nova senha' no formulário.",
+    )
+    prazo_validacao_dias = models.PositiveIntegerField(
+        default=2,
+        verbose_name="Prazo de validação (dias)",
+        help_text="Dias para validar um card EXECUTADO antes de finalizar automaticamente.",
+    )
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Configuração de Segurança"
+        verbose_name_plural = "Configuração de Segurança"
+
+    def __str__(self):
+        return "Configuração de Segurança"
+
+    @classmethod
+    def get_solo(cls):
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+    def set_senha(self, raw: str):
+        self.senha_reabertura = make_password(raw)
+
+    def check_senha(self, raw: str) -> bool:
+        if not self.senha_reabertura or not raw:
+            return False
+        return check_password(raw, self.senha_reabertura)
 
 
 class PerfilUsuario(models.Model):
@@ -159,32 +206,89 @@ class JornalPost(models.Model):
         return self.arquivo.name.rsplit("/", 1)[-1]
 
 
-class JornalLike(models.Model):
+class JornalComentario(models.Model):
     """
-    Curtida de um usuário em uma postagem do Jornal.
+    Comentário de um usuário em uma postagem do Jornal.
     """
 
     post = models.ForeignKey(
         JornalPost,
         on_delete=models.CASCADE,
-        related_name="likes",
+        related_name="comentarios",
         verbose_name="Postagem",
     )
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
-        related_name="jornal_likes",
+        related_name="jornal_comentarios",
         verbose_name="Usuário",
     )
+    texto = models.TextField(verbose_name="Comentário")
+    criado_em = models.DateTimeField(auto_now_add=True, verbose_name="Comentado em")
+
+    class Meta:
+        verbose_name = "Comentário do Jornal"
+        verbose_name_plural = "Comentários do Jornal"
+        ordering = ["criado_em"]
+
+    def __str__(self):
+        return f"{self.user.username} comentou #{self.post_id}"
+
+
+class JornalReacao(models.Model):
+    """
+    Reação (emoji) de um usuário a uma postagem OU a um comentário do Jornal.
+
+    Exatamente um entre ``post`` e ``comentario`` é preenchido. Um usuário pode
+    ter, no mesmo alvo, no máximo uma reação por emoji (mas pode usar emojis
+    diferentes no mesmo alvo — estilo Slack).
+    """
+
+    # Paleta de reações disponíveis (ordem usada no seletor da interface).
+    EMOJIS = ["👍", "❤️", "😂", "🔥", "😮", "👏", "🎉", "😢"]
+
+    post = models.ForeignKey(
+        JornalPost,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="reacoes",
+        verbose_name="Postagem",
+    )
+    comentario = models.ForeignKey(
+        JornalComentario,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="reacoes",
+        verbose_name="Comentário",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="jornal_reacoes",
+        verbose_name="Usuário",
+    )
+    emoji = models.CharField(max_length=8, verbose_name="Reação")
     criado_em = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        verbose_name = "Curtida do Jornal"
-        verbose_name_plural = "Curtidas do Jornal"
-        unique_together = ("post", "user")
+        verbose_name = "Reação do Jornal"
+        verbose_name_plural = "Reações do Jornal"
+        constraints = [
+            # NULLs são distintos no Postgres, então cada constraint só atua
+            # sobre o alvo correspondente — juntas garantem unicidade por alvo.
+            models.UniqueConstraint(
+                fields=["post", "user", "emoji"], name="uniq_reacao_post"
+            ),
+            models.UniqueConstraint(
+                fields=["comentario", "user", "emoji"], name="uniq_reacao_comentario"
+            ),
+        ]
 
     def __str__(self):
-        return f"{self.user.username} curtiu #{self.post_id}"
+        alvo = f"post #{self.post_id}" if self.post_id else f"comentário #{self.comentario_id}"
+        return f"{self.user_id} reagiu {self.emoji} em {alvo}"
 
 
 class JornalLeitura(models.Model):
