@@ -2,6 +2,13 @@ from __future__ import annotations
 
 from typing import Dict
 
+from django.conf import settings
+
+
+def versao_site(request) -> Dict[str, str]:
+    """Disponibiliza a versão do site (Credcom Hub) para a navbar."""
+    return {"site_version": getattr(settings, "SITE_VERSION", "")}
+
 GRP_COORDENACAO = {"OPERACAO_COORDENACAO"}
 GRP_SUPERVISAO  = {"OPERACAO_SUPERVISOR"}
 GRP_OPERACAO    = {"OPERACAO"}

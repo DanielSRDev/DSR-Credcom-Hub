@@ -47,6 +47,9 @@ node_modules/
 *.bak
 *.tmp
 
+# Estado de runtime do envio automatico do Nibo
+var/nibo_auto_envio_ultima_exec.txt
+
 # Secrets
 *.key
 *.pem

@@ -797,9 +797,9 @@ def exportar_relatorio_geral_view(request):
 
         # Regras de Valor Parcela:
         # 1a. PAGAMENTO_EXTRA outros tipos: pagamento - HO - despesa - taxa
-        # 1b. PAGAMENTO_EXTRA PARCELAMENTO/REFINANCIAMENTO: pagamento - HO - taxa
+        # 1b. PAGAMENTO_EXTRA PARCELAMENTO/REFINANCIAMENTO/CONGELAMENTO: pagamento - HO - taxa
         #     (despesa_liquida = SUM(acp_despesa) = dívida refinanciada; não é taxa administrativa)
-        # 2.  HUB PARCELAMENTO/REFINANCIAMENTO: valor_entrada - HO - taxa
+        # 2.  HUB PARCELAMENTO/REFINANCIAMENTO/CONGELAMENTO: valor_entrada - HO - taxa
         #     (valor_entrada = aco_entrada = primeiro pagamento; valor_pago = HO, não o pagamento real)
         # 3.  Demais (PARCELA AVULSA, ATUALIZAÇÃO DE DÉBITO, etc.): mantém
         #     principal + multa + juros para não gerar parcela negativa em AVENCER/QUEBRA.
@@ -807,7 +807,7 @@ def exportar_relatorio_geral_view(request):
         valor_entrada_col = pd.to_numeric(df.get("valor_entrada", 0), errors="coerce").fillna(0)
         despesas_col = pd.to_numeric(df.get("despesas", 0), errors="coerce").fillna(0)
         tipo_neg_col = df.get("tipo_negociacao", pd.Series([""] * len(df), index=df.index)).fillna("")
-        eh_parcelado = tipo_neg_col.str.contains(r"PARCELAMENTO|REFINANCIAMENTO", case=False, na=False)
+        eh_parcelado = tipo_neg_col.str.contains(r"PARCELAMENTO|REFINANCIAMENTO|CONGELAMENTO", case=False, na=False)
 
         df["valor_parcela_exportacao"] = valor_parcela_base
 

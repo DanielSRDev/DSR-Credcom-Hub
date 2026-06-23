@@ -10,9 +10,11 @@ Cada processar_* trata UMA linha de uma tabela e reporta o resultado num
 RelatorioRemessa (avisos/erros/processados), sem depender de request/messages.
 """
 
+import csv
 import unicodedata
 from datetime import datetime, timedelta, date
 from decimal import Decimal, ROUND_HALF_UP
+from pathlib import Path
 
 from django.conf import settings
 from django.db import connection
@@ -26,6 +28,22 @@ from .nibo import (
     map_costcenter_by_id_cob,
     only_digits,
 )
+
+# Mapa reverso UUID -> nome amigavel da categoria (usado na auditoria/CSV).
+CAT_NOME = {v: k for k, v in CAT.items()}
+
+
+def _nibo_id(resp):
+    """Extrai, de forma tolerante, o id que a API do Nibo retorna no POST."""
+    if isinstance(resp, dict):
+        for k in ("id", "Id", "scheduleId", "receiptId", "entryId"):
+            if resp.get(k):
+                return str(resp[k])
+        return ""
+    if isinstance(resp, str):
+        return resp.strip().strip('"')
+    return ""
+
 
 # ============================================================
 # CONFIG CODIGO VB
@@ -293,12 +311,17 @@ class RelatorioRemessa:
         self.processados = 0
         self.avisos = []
         self.erros = []
+        self.enviados = []  # detalhe de cada lancamento enviado (para auditoria)
 
     def aviso(self, msg):
         self.avisos.append(str(msg))
 
     def erro(self, msg):
         self.erros.append(str(msg))
+
+    def registrar(self, **dados):
+        """Guarda os detalhes de um registro efetivamente enviado ao Nibo."""
+        self.enviados.append(dados)
 
     @property
     def total_avisos(self):
@@ -311,6 +334,48 @@ class RelatorioRemessa:
 
 def _marcar_enviado(table, _id):
     qexec(f"UPDATE {table} SET enviado = TRUE WHERE {PK_COL[table]} = %s", [_id])
+
+
+# ============================================================
+# AUDITORIA: CSV com um registro por lancamento enviado
+# ============================================================
+CSV_COLUNAS = [
+    "enviado_em", "tabela", "id_local", "aco_id", "cliente", "doc", "filial",
+    "descricao", "valor", "data", "vencimento", "centro_custo", "reference",
+    "categoria_in", "nibo_receipt_id", "categoria_out", "nibo_payment_id",
+]
+
+
+def gravar_csv_auditoria(enviados, *, base_dir=None, prefixo="remessa"):
+    """
+    Grava em var/nibo_remessa/ um CSV com UMA linha por lancamento enviado
+    (tabela, id local, acordo, cliente, valor, categorias e os IDs que o Nibo
+    devolveu). Serve para auditar exatamente o que foi mandado em cada execucao.
+
+    Retorna o Path do arquivo, ou None se nao houver nada para gravar.
+    """
+    if not enviados:
+        return None
+    try:
+        base = Path(base_dir or getattr(settings, "BASE_DIR", Path(".")))
+        out_dir = base / "var" / "nibo_remessa"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        agora = datetime.now()
+        out_path = out_dir / f"{prefixo}_{agora:%Y%m%d_%H%M%S}.csv"
+        carimbo = agora.strftime("%d/%m/%Y %H:%M:%S")
+        # utf-8-sig + ';' para abrir bonito no Excel pt-BR.
+        with out_path.open("w", newline="", encoding="utf-8-sig") as fh:
+            w = csv.DictWriter(fh, fieldnames=CSV_COLUNAS, delimiter=";", extrasaction="ignore")
+            w.writeheader()
+            for e in enviados:
+                linha = dict(e)
+                linha.setdefault("enviado_em", carimbo)
+                if linha.get("valor") is not None:
+                    linha["valor"] = str(linha["valor"]).replace(".", ",")
+                w.writerow(linha)
+        return out_path
+    except Exception:
+        return None
 
 
 # ============================================================
@@ -365,20 +430,28 @@ def processar_repasse(_id, account_id, cc_padrao, rep, *, exigir_cc=False, dry_r
         stakeholder_cliente = find_or_create_customer(cliente_nome, cliente_doc)
         stakeholder_fornecedor = find_or_create_supplier(cliente_nome, cliente_doc)
 
-        send_receipt(
+        resp_in = send_receipt(
             account_id,
             stakeholder_id=stakeholder_cliente,
             dt=dt_str, desc=desc, reference=reference,
             category_id=CAT["REPASSES_IN"], value=valor_rep, costcenter_id=cc_id,
         )
         vcto = vcto_mais_15(pgo_dt)
-        send_payment(
+        resp_out = send_payment(
             stakeholder_id=stakeholder_fornecedor,
             vcto=vcto, desc=desc, reference=reference,
             category_id=CAT["REPASSES_OUT"], value=valor_rep, costcenter_id=cc_id,
         )
         _marcar_enviado(TB["repasse"], row["id"])
         rep.processados += 1
+        rep.registrar(
+            tabela="tb_repasse", id_local=row["id"], aco_id=aco_id,
+            cliente=cliente_nome, doc=cliente_doc, filial=row.get("filial_nome"),
+            descricao=desc, valor=valor_rep, data=dt_str, vencimento=vcto,
+            centro_custo=cc_id, reference=reference,
+            categoria_in="REPASSES_IN", nibo_receipt_id=_nibo_id(resp_in),
+            categoria_out="REPASSES_OUT", nibo_payment_id=_nibo_id(resp_out),
+        )
     except Exception as e:
         rep.erro(f"tb_repasse id={row['id']} falhou: {e}")
 
@@ -423,20 +496,28 @@ def processar_repassevr(_id, account_id, cc_padrao, rep, *, exigir_cc=False, dry
         stakeholder_cliente = find_or_create_customer(cliente_nome, cliente_doc)
         stakeholder_fornecedor = find_or_create_supplier(cliente_nome, cliente_doc)
 
-        send_receipt(
+        resp_in = send_receipt(
             account_id,
             stakeholder_id=stakeholder_cliente,
             dt=dt_str, desc=desc, reference=reference,
             category_id=CAT["REPASSES_IN"], value=valor_dec, costcenter_id=cc_id,
         )
         desc_pay = desc if is_vb else f"Repasse {aco_id} - {cliente_nome}"
-        send_payment(
+        resp_out = send_payment(
             stakeholder_id=stakeholder_fornecedor,
             vcto=vcto, desc=desc_pay, reference=reference,
             category_id=CAT["REPASSES_OUT"], value=valor_dec, costcenter_id=cc_id,
         )
         _marcar_enviado(TB["repassevr"], row["id"])
         rep.processados += 1
+        rep.registrar(
+            tabela="tb_repassevr", id_local=row["id"], aco_id=aco_id,
+            cliente=cliente_nome, doc=cliente_doc, filial=row.get("filial_nome"),
+            descricao=desc, valor=valor_dec, data=dt_str, vencimento=vcto,
+            centro_custo=cc_id, reference=reference,
+            categoria_in="REPASSES_IN", nibo_receipt_id=_nibo_id(resp_in),
+            categoria_out="REPASSES_OUT", nibo_payment_id=_nibo_id(resp_out),
+        )
     except Exception as e:
         rep.erro(f"tb_repassevr id={row['id']} falhou: {e}")
 
@@ -478,13 +559,21 @@ def processar_contapagar(_id, account_id, cc_padrao, rep, *, exigir_cc=False, dr
         cliente_doc = only_digits(row.get("cliente_cpfcnpj") or "00000000000")
         stakeholder_fornecedor = find_or_create_supplier(cliente_nome, cliente_doc)
 
-        send_payment(
+        resp_out = send_payment(
             stakeholder_id=stakeholder_fornecedor,
             vcto=vcto, desc=desc, reference=reference,
             category_id=categoria, value=valor_cp, costcenter_id=cc_id,
         )
         _marcar_enviado(TB["contapagar"], row["id"])
         rep.processados += 1
+        rep.registrar(
+            tabela="tb_contaspagar", id_local=row["id"], aco_id=row.get("aco_id"),
+            cliente=cliente_nome, doc=cliente_doc, filial=row.get("filial_nome"),
+            descricao=desc, valor=valor_cp, data="", vencimento=vcto,
+            centro_custo=cc_id, reference=reference,
+            categoria_in="", nibo_receipt_id="",
+            categoria_out=CAT_NOME.get(categoria, categoria), nibo_payment_id=_nibo_id(resp_out),
+        )
     except Exception as e:
         rep.erro(f"tb_contapagar id={row['id']} falhou: {e}")
 
@@ -526,7 +615,7 @@ def processar_contareceber(_id, account_id, cc_padrao, rep, *, exigir_cc=False, 
         cliente_doc = only_digits(row.get("cliente_cpfcnpj") or "00000000000")
         stakeholder_cliente = find_or_create_customer(cliente_nome, cliente_doc)
 
-        send_receipt(
+        resp_in = send_receipt(
             account_id,
             stakeholder_id=stakeholder_cliente,
             dt=dt_str, desc=desc, reference=reference,
@@ -534,6 +623,14 @@ def processar_contareceber(_id, account_id, cc_padrao, rep, *, exigir_cc=False, 
         )
         _marcar_enviado(TB["contareceber"], row["id"])
         rep.processados += 1
+        rep.registrar(
+            tabela="tb_contareceber", id_local=row["id"], aco_id=row.get("aco_id"),
+            cliente=cliente_nome, doc=cliente_doc, filial=row.get("filial_nome"),
+            descricao=desc, valor=valor_cr, data=dt_str, vencimento="",
+            centro_custo=cc_id, reference=reference,
+            categoria_in=CAT_NOME.get(categoria, categoria), nibo_receipt_id=_nibo_id(resp_in),
+            categoria_out="", nibo_payment_id="",
+        )
     except Exception as e:
         rep.erro(f"tb_contareceber id={row['id']} falhou: {e}")
 
@@ -584,7 +681,7 @@ def processar_despesa(_id, account_id, cc_padrao, rep, *, exigir_cc=False, dry_r
         stakeholder_cliente = find_or_create_customer(cliente_nome, cliente_doc)
         stakeholder_fornecedor = find_or_create_supplier(cliente_nome, cliente_doc)
 
-        send_receipt(
+        resp_in = send_receipt(
             account_id,
             stakeholder_id=stakeholder_cliente,
             dt=dt_str, desc=desc, reference=reference,
@@ -592,13 +689,21 @@ def processar_despesa(_id, account_id, cc_padrao, rep, *, exigir_cc=False, dry_r
         )
         vcto = (pgo_dt.date() + timedelta(days=15)).strftime("%Y-%m-%d")
         desc_pay = desc if is_vb else f"Despesa {aco_id} - {cliente_nome}"
-        send_payment(
+        resp_out = send_payment(
             stakeholder_id=stakeholder_fornecedor,
             vcto=vcto, desc=desc_pay, reference=reference,
             category_id=CAT["GASTOS_REEMBOLSAVEIS_OUT"], value=valor_des, costcenter_id=cc_id,
         )
         _marcar_enviado(TB["despesa"], row["id"])
         rep.processados += 1
+        rep.registrar(
+            tabela="tb_despesa", id_local=row["id"], aco_id=aco_id,
+            cliente=cliente_nome, doc=cliente_doc, filial=base.get("filial_nome"),
+            descricao=desc, valor=valor_des, data=dt_str, vencimento=vcto,
+            centro_custo=cc_id, reference=reference,
+            categoria_in="REEMBOLSOS_IN", nibo_receipt_id=_nibo_id(resp_in),
+            categoria_out="GASTOS_REEMBOLSAVEIS_OUT", nibo_payment_id=_nibo_id(resp_out),
+        )
     except Exception as e:
         rep.erro(f"tb_despesa id={row['id']} falhou: {e}")
 
@@ -613,16 +718,23 @@ PROCESSADORES = [
 ]
 
 
-def _ids_nao_enviados_por_data(table_key, data_ini, data_fim):
+def _ids_nao_enviados_por_data(table_key, data_ini, data_fim, creds_ativos):
     """
-    IDs de registros com enviado=FALSE cuja data efetiva cai em [ini, fim].
+    IDs de registros com enviado=FALSE cuja data efetiva cai em [ini, fim] E
+    cujo credor esta ATIVO em CredorVisivel (mesma restricao do painel: credor
+    nao habilitado no admin nao e enviado).
 
-    A maioria das tabelas usa a coluna pgo_data. tb_despesa NAO tem pgo_data:
-    a data dela vem do repasse/repasseVR vinculado (mesma regra da listagem),
-    com fallback em aco_etl_alteracao.
+    A maioria das tabelas usa a coluna pgo_data. tb_despesa NAO tem pgo_data
+    nem credor_id: ambos vem do repasse/repasseVR vinculado (mesma regra da
+    listagem), com fallback de data em aco_etl_alteracao.
+
+    creds_ativos deve ser uma colecao NAO vazia de credor_id (o chamador trata
+    o caso vazio antes de chamar esta funcao).
     """
     table = TB[table_key]
     pk = PK_COL[table]
+    creds = list(creds_ativos)
+    ph = ", ".join(["%s"] * len(creds))
 
     if table_key == "despesa":
         data_expr = "COALESCE(r.pgo_data, rv.pgo_data, d.aco_etl_alteracao)"
@@ -630,21 +742,22 @@ def _ids_nao_enviados_por_data(table_key, data_ini, data_fim):
             SELECT d.{pk} AS id
               FROM {table} d
               LEFT JOIN LATERAL (
-                  SELECT pgo_data FROM tb_repasse r
+                  SELECT pgo_data, credor_id FROM tb_repasse r
                    WHERE r.aco_id = d.aco_id
                    ORDER BY COALESCE(r.pgo_data, NOW()) DESC LIMIT 1
               ) r ON TRUE
               LEFT JOIN LATERAL (
-                  SELECT pgo_data FROM tb_repassevr rv
+                  SELECT pgo_data, credor_id FROM tb_repassevr rv
                    WHERE rv.aco_id = d.aco_id
                    ORDER BY COALESCE(rv.pgo_data, NOW()) DESC LIMIT 1
               ) rv ON TRUE
              WHERE d.enviado = FALSE
                AND DATE({data_expr}) >= %s
                AND DATE({data_expr}) <= %s
+               AND COALESCE(r.credor_id, rv.credor_id) IN ({ph})
              ORDER BY d.{pk}
         """
-        return [r["id"] for r in qfetchall(sql, [data_ini, data_fim])]
+        return [r["id"] for r in qfetchall(sql, [data_ini, data_fim] + creds)]
 
     sql = f"""
         SELECT {pk} AS id
@@ -652,9 +765,19 @@ def _ids_nao_enviados_por_data(table_key, data_ini, data_fim):
          WHERE enviado = FALSE
            AND DATE(pgo_data) >= %s
            AND DATE(pgo_data) <= %s
+           AND credor_id IN ({ph})
          ORDER BY {pk}
     """
-    return [r["id"] for r in qfetchall(sql, [data_ini, data_fim])]
+    return [r["id"] for r in qfetchall(sql, [data_ini, data_fim] + creds)]
+
+
+def _credores_ativos():
+    """credor_id dos credores marcados como ativos em CredorVisivel (mesma
+    fonte que o painel usa para decidir o que e visivel/operavel)."""
+    from ..models import CredorVisivel
+    return set(
+        CredorVisivel.objects.filter(ativo=True).values_list("credor_id", flat=True)
+    )
 
 
 def enviar_periodo(data_ini, data_fim, *, dry_run=False, cc_padrao=None, rep=None):
@@ -662,13 +785,25 @@ def enviar_periodo(data_ini, data_fim, *, dry_run=False, cc_padrao=None, rep=Non
     Envia para o Nibo todos os registros NAO enviados (enviado=FALSE) cujas
     datas (pgo_data) caem entre data_ini e data_fim, em todas as 5 tabelas.
 
+    So envia credores ATIVOS em CredorVisivel (mesma restricao do painel):
+    credor nao habilitado no admin nunca e enviado. Se nenhum credor estiver
+    ativo, nao envia nada e registra um aviso (fail-closed por seguranca).
+
     Uso automatico: exige centro de custo mapeado (pula quem nao tem).
     """
     account_id = settings.NIBO_ACCOUNT_ID
     rep = rep or RelatorioRemessa()
 
+    creds_ativos = _credores_ativos()
+    if not creds_ativos:
+        rep.aviso(
+            "Nenhum credor ATIVO em 'Credores visíveis (Painel Nibo)'. "
+            "Nada foi enviado (habilite os credores no admin)."
+        )
+        return rep
+
     for table_key, processar in PROCESSADORES:
-        ids = _ids_nao_enviados_por_data(table_key, data_ini, data_fim)
+        ids = _ids_nao_enviados_por_data(table_key, data_ini, data_fim, creds_ativos)
         for _id in ids:
             processar(_id, account_id, cc_padrao, rep, exigir_cc=True, dry_run=dry_run)
 

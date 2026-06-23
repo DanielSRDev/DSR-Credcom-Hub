@@ -10,6 +10,7 @@ from django.contrib.auth.models import User
 from django.db.models import Count, Q, Max
 from django.http import HttpResponseForbidden, JsonResponse, FileResponse, Http404
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST, require_GET
 
@@ -172,9 +173,16 @@ def _aplicar_filtros(qs, request):
 # QUADRO
 # ============================================================
 
-@user_in_groups("OPERACAO", "OPERACAO_SUPERVISOR", "OPERACAO_CORDENACAO")
-@login_required
-def quadro(request):
+def _voltar_url(request):
+    """URL do quadro (com filtros atuais) usada nos 'next' dos cards.
+    Reconstruída a partir de request.GET para ser igual tanto na página
+    cheia quanto no endpoint /partial/cards/ do auto-refresh."""
+    base = reverse("operacao:quadro")
+    qs = request.GET.urlencode()
+    return f"{base}?{qs}" if qs else base
+
+
+def _contexto_quadro(request):
     # Fecha automaticamente cards EXECUTADO que estouraram o prazo de validação.
     finalizar_executados_vencidos(Tarefa, Comentario)
 
@@ -234,8 +242,25 @@ def quadro(request):
         "is_supervisor": is_supervisor(request.user),
         "is_coord":      is_coord(request.user),
         "devolucao_form": DevolucaoForm(),   # NOVO
+        # URL canônica do quadro (não o endpoint /partial/cards/) para os
+        # campos "next" dos cards funcionarem mesmo após o auto-refresh.
+        "voltar_url": _voltar_url(request),
     }
-    return render(request, "operacao/operacao.html", context)
+    return context
+
+
+@user_in_groups("OPERACAO", "OPERACAO_SUPERVISOR", "OPERACAO_CORDENACAO")
+@login_required
+def quadro(request):
+    return render(request, "operacao/operacao.html", _contexto_quadro(request))
+
+
+@user_in_groups("OPERACAO", "OPERACAO_SUPERVISOR", "OPERACAO_CORDENACAO")
+@login_required
+@require_GET
+def partial_cards(request):
+    # Mesmos dados do quadro, mas só os cards (usado no auto-refresh sem F5).
+    return render(request, "operacao/partials/cards.html", _contexto_quadro(request))
 
 
 # ============================================================

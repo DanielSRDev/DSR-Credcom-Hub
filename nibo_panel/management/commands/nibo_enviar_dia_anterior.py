@@ -19,7 +19,7 @@ from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
-from nibo_panel.services.remessa import enviar_periodo
+from nibo_panel.services.remessa import enviar_periodo, gravar_csv_auditoria
 
 
 def dia_util_anterior(referencia=None):
@@ -99,5 +99,10 @@ class Command(BaseCommand):
         caminho = _registrar_log(linhas)
         if caminho:
             self.stdout.write(f"Log salvo em: {caminho}")
+
+        # CSV de auditoria: uma linha por lancamento efetivamente enviado.
+        csv_path = gravar_csv_auditoria(rep.enviados)
+        if csv_path:
+            self.stdout.write(self.style.SUCCESS(f"Auditoria CSV ({len(rep.enviados)} envios): {csv_path}"))
 
         return resumo

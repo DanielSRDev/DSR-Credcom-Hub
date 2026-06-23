@@ -22,4 +22,5 @@ urlpatterns = [
     path("prioridade/<int:tarefa_id>/",   views.toggle_prioridade,   name="prioridade"),
     path("reordenar/",                    views.reordenar,           name="reordenar"),
     path("partial/kpis/",                 views.partial_kpis,        name="partial_kpis"),
+    path("partial/cards/",                views.partial_cards,       name="partial_cards"),
 ]

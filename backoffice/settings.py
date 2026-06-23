@@ -30,6 +30,18 @@ DEBUG = True
 
 ALLOWED_HOSTS = ['*']
 
+# Origens confiáveis para CSRF quando o HUB é servido via HTTPS (certificado mkcert).
+# Necessário no Django 4+ para aceitar POSTs vindos destas URLs https.
+CSRF_TRUSTED_ORIGINS = [
+    'https://hub.credcom.local:8000',
+    'https://192.168.0.204:8000',
+    'https://localhost:8000',
+    'https://127.0.0.1:8000',
+]
+
+# Versão exibida na navbar (Credcom Hub). Alterar aqui em cada release.
+SITE_VERSION = "0.1.10"
+
 
 # Application definition
 
@@ -40,6 +52,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'django_extensions',  # habilita runserver_plus (HTTPS no dev server)
     "nibo_panel",
     "widget_tweaks",
     "Gestao",
@@ -80,6 +93,7 @@ TEMPLATES = [
                 "core.context_processors.nav_permissoes",
                 "core.context_processors.minhas_notas",
                 "core.context_processors.jornal_ctx",
+                "core.context_processors.versao_site",
                 "chat_interno.context_processors.chat_nav",
             ],
         },

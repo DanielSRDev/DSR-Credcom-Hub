@@ -36,4 +36,5 @@ urlpatterns = [
 
     # KPIs ao vivo
     path("partial/kpis/",             views.partial_kpis,              name="partial_kpis"),
+    path("partial/cards/",            views.partial_cards,             name="partial_cards"),
 ]

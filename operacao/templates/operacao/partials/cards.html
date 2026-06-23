@@ -1,0 +1,267 @@
+      {# ===== ABERTAS ===== #}
+      <div id="col-aberta">
+        <div class="col-header">
+          <div class="col-title">Abertas <span class="col-badge badge-col-aberta">{{ abertas|length }}</span></div>
+        </div>
+        <div id="lista-abertas" class="cards-grid">
+          {% for t in abertas %}
+            <div class="op-card {% if t.esta_atrasada %}card-late{% elif t.vencendo %}card-warn{% endif %} {% if t.pendente_em %}card-refazer{% endif %}" data-id="{{ t.id }}">
+              <div class="card-stripe stripe-aberta"></div>
+              <div class="card-body">
+                <div class="card-codigo">{{ t.codigo }}</div>
+                <div class="card-titulo">{% if t.prioridade %}<span class="badge-prio">prio</span> {% endif %}{{ t.titulo }}</div>
+                {% if t.descricao %}<div class="card-desc">{{ t.descricao }}</div>{% endif %}
+                <div class="card-meta">
+                  <div>Criado: <b>{{ t.criada_em|date:"d/m/Y H:i" }}</b> por <b>{{ t.criada_por.username|default:"-" }}</b></div>
+                  <div>Prazo: <b>{{ t.prazo|date:"d/m/Y H:i" }}</b></div>
+                  <div>Para: <b>{{ t.atribuida_para.username }}</b></div>
+                </div>
+              </div>
+              <div class="card-footer">
+                <div class="card-icons">
+                  <a class="card-icon-btn" title="Visualizar" href="{% url 'operacao:detalhe' t.id %}?next={{ voltar_url|urlencode }}">👁️</a>
+                  <a class="card-icon-btn" title="Anexos" href="{% url 'operacao:anexos' t.id %}?next={{ voltar_url|urlencode }}">📎{% if t.anexos_count %}<span class="icon-count">{{ t.anexos_count }}</span>{% endif %}</a>
+                  <a class="card-icon-btn" title="Comentários" href="{% url 'operacao:detalhe' t.id %}?next={{ voltar_url|urlencode }}">💬{% if t.comentarios_count %}<span class="icon-count">{{ t.comentarios_count }}</span>{% endif %}</a>
+                  {% if pode_prioridade %}<form method="post" action="{% url 'operacao:prioridade' t.id %}" style="display:inline">{% csrf_token %}<input type="hidden" name="next" value="{{ voltar_url }}"><button class="card-icon-btn" type="submit" title="Prioridade">🚩</button></form>{% endif %}
+                  {% if pode_editar %}<a class="card-icon-btn" title="Editar" href="{% url 'operacao:editar' t.id %}?next={{ voltar_url|urlencode }}">✏️</a>{% endif %}
+                  {% if pode_deletar %}<a class="card-icon-btn" title="Deletar" href="{% url 'operacao:deletar' t.id %}?next={{ voltar_url|urlencode }}">🗑️</a>{% endif %}
+                </div>
+                <div class="card-actions">
+                  {% if t.pendente_em %}<span class="badge-refazer">↩ devolvido</span>{% endif %}
+                  {% if request.user.id == t.atribuida_para_id or pode_editar %}
+                    <form method="post" action="{% url 'operacao:executando' t.id %}">{% csrf_token %}<input type="hidden" name="next" value="{{ voltar_url }}"><button class="btn btn-sm btn-outline-success" type="submit">Executando</button></form>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+          {% empty %}
+            <div class="empty-state" style="grid-column:1/-1"><div class="empty-icon">📋</div>Sem chamados abertos.</div>
+          {% endfor %}
+        </div>
+      </div>
+
+      {# ===== EXECUTANDO ===== #}
+      <div id="col-executando" style="display:none">
+        <div class="col-header">
+          <div class="col-title">Executando <span class="col-badge badge-col-executando">{{ executando|length }}</span></div>
+        </div>
+        <div class="cards-grid">
+          {% for t in executando %}
+            <div class="op-card {% if t.pendente_em %}card-refazer{% endif %}">
+              <div class="card-stripe stripe-executando"></div>
+              <div class="card-body">
+                <div class="card-codigo">{{ t.codigo }}</div>
+                <div class="card-titulo">{% if t.prioridade %}<span class="badge-prio">prio</span> {% endif %}{{ t.titulo }}</div>
+                {% if t.descricao %}<div class="card-desc">{{ t.descricao }}</div>{% endif %}
+                <div class="card-meta">
+                  <div>Início: <b>{{ t.iniciado_em|date:"d/m/Y H:i"|default:"-" }}</b> executor: <b>{{ t.executor.username|default:"-" }}</b></div>
+                  <div>Prazo: <b>{{ t.prazo|date:"d/m/Y H:i" }}</b></div>
+                  <div>Para: <b>{{ t.atribuida_para.username }}</b></div>
+                </div>
+              </div>
+              <div class="card-footer">
+                <div class="card-icons">
+                  <a class="card-icon-btn" href="{% url 'operacao:detalhe' t.id %}?next={{ voltar_url|urlencode }}" title="Visualizar">👁️</a>
+                  <a class="card-icon-btn" href="{% url 'operacao:anexos' t.id %}?next={{ voltar_url|urlencode }}" title="Anexos">📎{% if t.anexos_count %}<span class="icon-count">{{ t.anexos_count }}</span>{% endif %}</a>
+                  <a class="card-icon-btn" href="{% url 'operacao:detalhe' t.id %}?next={{ voltar_url|urlencode }}" title="Comentários">💬{% if t.comentarios_count %}<span class="icon-count">{{ t.comentarios_count }}</span>{% endif %}</a>
+                  {% if pode_editar or request.user.id == t.criada_por_id %}<a class="card-icon-btn" href="{% url 'operacao:editar' t.id %}?next={{ voltar_url|urlencode }}" title="Editar">✏️</a>{% endif %}
+                  {% if pode_deletar %}<a class="card-icon-btn" href="{% url 'operacao:deletar' t.id %}?next={{ voltar_url|urlencode }}" title="Deletar">🗑️</a>{% endif %}
+                </div>
+                <div class="card-actions">
+                  {% if t.pendente_em %}<span class="badge-refazer">↩ devolvido</span>{% endif %}
+                  {% if request.user.id == t.executor_id or pode_editar %}
+                    <form method="post" action="{% url 'operacao:executado' t.id %}">{% csrf_token %}<input type="hidden" name="next" value="{{ voltar_url }}"><button class="btn btn-sm btn-outline-dark" type="submit">Marcar executado</button></form>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+          {% empty %}
+            <div class="empty-state" style="grid-column:1/-1"><div class="empty-icon">⚙️</div>Nada em execução agora.</div>
+          {% endfor %}
+        </div>
+      </div>
+
+      {# ===== EXECUTADO ===== #}
+      <div id="col-executado" style="display:none">
+        <div class="col-header">
+          <div class="col-title">Executado <span class="col-badge badge-col-executado">{{ executado|length }}</span></div>
+        </div>
+        <div class="cards-grid">
+          {% for t in executado %}
+            {% if request.user.id == t.criada_por_id or pode_editar %}
+              <div class="op-card card-validar">
+            {% else %}
+              <div class="op-card">
+            {% endif %}
+              <div class="card-stripe stripe-executado"></div>
+              <div class="card-body">
+                <div class="card-codigo">{{ t.codigo }}</div>
+                <div class="card-titulo">{% if t.prioridade %}<span class="badge-prio">prio</span> {% endif %}{{ t.titulo }}</div>
+                {% if t.descricao %}<div class="card-desc">{{ t.descricao }}</div>{% endif %}
+                <div class="card-meta">
+                  <div>Executado: <b>{{ t.executado_em|date:"d/m/Y H:i"|default:"-" }}</b> por <b>{{ t.executor.username|default:"-" }}</b></div>
+                  <div>Prazo: <b>{{ t.prazo|date:"d/m/Y H:i" }}</b></div>
+                  <div>Criado por: <b>{{ t.criada_por.username|default:"-" }}</b></div>
+                </div>
+              </div>
+              <div class="card-footer">
+                <div class="card-icons">
+                  <a class="card-icon-btn" href="{% url 'operacao:detalhe' t.id %}?next={{ voltar_url|urlencode }}" title="Visualizar">👁️</a>
+                  <a class="card-icon-btn" href="{% url 'operacao:anexos' t.id %}?next={{ voltar_url|urlencode }}" title="Anexos">📎{% if t.anexos_count %}<span class="icon-count">{{ t.anexos_count }}</span>{% endif %}</a>
+                  <a class="card-icon-btn" href="{% url 'operacao:detalhe' t.id %}?next={{ voltar_url|urlencode }}" title="Comentários">💬{% if t.comentarios_count %}<span class="icon-count">{{ t.comentarios_count }}</span>{% endif %}</a>
+                  {% if pode_deletar %}<a class="card-icon-btn" href="{% url 'operacao:deletar' t.id %}?next={{ voltar_url|urlencode }}" title="Deletar">🗑️</a>{% endif %}
+                </div>
+                <div class="card-actions">
+                  {% if request.user.id == t.criada_por_id or pode_editar %}
+                    <span class="badge-validar">⚡ validar</span>
+                    <form method="post" action="{% url 'operacao:toggle' t.id %}">{% csrf_token %}<input type="hidden" name="next" value="{{ voltar_url }}"><button class="btn btn-sm btn-outline-success" type="submit">✅ Finalizar</button></form>
+                    <button class="btn btn-sm btn-outline-warning" type="button" data-bs-toggle="modal" data-bs-target="#modalDevolver{{ t.id }}">↩ Devolver</button>
+                  {% else %}
+                    <span class="text-secondary" style="font-size:11px">Aguardando validação do criador.</span>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+
+            {# Modal devolução #}
+            <div class="modal fade modal-devolucao" id="modalDevolver{{ t.id }}" tabindex="-1">
+              <div class="modal-dialog">
+                <div class="modal-content">
+                  <div class="modal-header">
+                    <h5 class="modal-title">↩ Devolver com pendência</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                  </div>
+                  <form method="post" action="{% url 'operacao:devolver' t.id %}">
+                    {% csrf_token %}
+                    <input type="hidden" name="next" value="{{ voltar_url }}">
+                    <div class="modal-body">
+                      <p class="text-secondary small mb-3"><b>{{ t.codigo }}</b> — {{ t.titulo }}<br>Executor: <b>{{ t.executor.username|default:"-" }}</b></p>
+                      <label class="form-label fw-semibold">O que precisa ser corrigido? <span class="text-danger">*</span></label>
+                      {{ devolucao_form.motivo }}
+                    </div>
+                    <div class="modal-footer">
+                      <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+                      <button type="submit" class="btn btn-warning">Devolver para o executor</button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            </div>
+          {% empty %}
+            <div class="empty-state" style="grid-column:1/-1"><div class="empty-icon">✔️</div>Nada executado ainda.</div>
+          {% endfor %}
+        </div>
+      </div>
+
+      {# ===== PENDENTE ===== #}
+      <div id="col-pendente" style="display:none">
+        <div class="col-header">
+          <div class="col-title">⚠ Pendente <span class="col-badge badge-col-pendente">{{ pendentes|length }}</span></div>
+        </div>
+        <div class="cards-grid">
+          {% for t in pendentes %}
+            <div class="op-card card-pendente">
+              <div class="card-stripe stripe-pendente"></div>
+              <div class="card-body">
+                <div class="card-codigo">{{ t.codigo }}</div>
+                <div class="card-titulo">{% if t.prioridade %}<span class="badge-prio">prio</span> {% endif %}{{ t.titulo }}</div>
+                {% if t.descricao %}<div class="card-desc">{{ t.descricao }}</div>{% endif %}
+                <div class="card-meta">
+                  <div>Devolvido em: <b>{{ t.pendente_em|date:"d/m/Y H:i"|default:"-" }}</b></div>
+                  <div>Executor: <b>{{ t.executor.username|default:"-" }}</b></div>
+                  <div>Criado por: <b>{{ t.criada_por.username|default:"-" }}</b></div>
+                </div>
+              </div>
+              <div class="card-footer">
+                <div class="card-icons">
+                  <a class="card-icon-btn" href="{% url 'operacao:detalhe' t.id %}?next={{ voltar_url|urlencode }}" title="Visualizar">👁️</a>
+                  <a class="card-icon-btn" href="{% url 'operacao:detalhe' t.id %}?next={{ voltar_url|urlencode }}" title="Comentários">💬{% if t.comentarios_count %}<span class="icon-count">{{ t.comentarios_count }}</span>{% endif %}</a>
+                </div>
+                <div class="card-actions">
+                  {% if request.user.id == t.executor_id or request.user.id == t.atribuida_para_id or pode_editar %}
+                    <form method="post" action="{% url 'operacao:confirmar_devolucao' t.pk %}">{% csrf_token %}<input type="hidden" name="next" value="{{ voltar_url }}"><button class="btn btn-sm btn-warning fw-bold" type="submit">✅ Marcar executado novamente</button></form>
+                  {% else %}
+                    <span class="text-secondary" style="font-size:11px">Aguardando o executor refazer.</span>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+          {% empty %}
+            <div class="empty-state" style="grid-column:1/-1"><div class="empty-icon">🟡</div>Sem pendências no momento.</div>
+          {% endfor %}
+        </div>
+      </div>
+
+      {# ===== FINALIZADAS ===== #}
+      <div id="col-finalizada" style="display:none">
+        <div class="col-header">
+          <div class="col-title">Finalizadas <span class="col-badge badge-col-finalizada">{{ finalizadas|length }}</span></div>
+          <form method="get">
+            <input type="hidden" name="data_ini" value="{{ f_data_ini }}">
+            <input type="hidden" name="data_fim" value="{{ f_data_fim }}">
+            <input type="hidden" name="user" value="{{ f_user }}">
+            <input type="hidden" name="busca" value="{{ f_busca }}">
+            <input type="hidden" name="col" value="finalizada">
+            <select name="final" class="final-select" onchange="this.form.submit()">
+              <option value="hoje" {% if final == "hoje" %}selected{% endif %}>Hoje</option>
+              <option value="7"    {% if final == "7" %}selected{% endif %}>7 dias</option>
+              <option value="30"   {% if final == "30" %}selected{% endif %}>30 dias</option>
+              <option value="tudo" {% if final == "tudo" %}selected{% endif %}>Tudo</option>
+            </select>
+          </form>
+        </div>
+        <div class="cards-grid">
+          {% for t in finalizadas %}
+            <div class="op-card">
+              <div class="card-stripe stripe-finalizada"></div>
+              <div class="card-body">
+                <div class="card-codigo">{{ t.codigo }}</div>
+                <div class="card-titulo">{% if t.prioridade %}<span class="badge-prio">prio</span> {% endif %}{{ t.titulo }}</div>
+                {% if t.descricao %}<div class="card-desc">{{ t.descricao }}</div>{% endif %}
+                <div class="card-meta">
+                  <div>Finalizado: <b>{{ t.finalizado_em|date:"d/m/Y H:i"|default:"-" }}</b>{% if t.finalizado_automaticamente %} <span class="badge bg-secondary" title="Finalizado automaticamente por falta de validação">🤖 auto</span>{% endif %}</div>
+                  <div>Para: <b>{{ t.atribuida_para.username }}</b></div>
+                </div>
+              </div>
+              <div class="card-footer">
+                <div class="card-icons">
+                  <a class="card-icon-btn" href="{% url 'operacao:detalhe' t.id %}?next={{ voltar_url|urlencode }}" title="Visualizar">👁️</a>
+                  <a class="card-icon-btn" href="{% url 'operacao:anexos' t.id %}?next={{ voltar_url|urlencode }}" title="Anexos">📎{% if t.anexos_count %}<span class="icon-count">{{ t.anexos_count }}</span>{% endif %}</a>
+                  <a class="card-icon-btn" href="{% url 'operacao:detalhe' t.id %}?next={{ voltar_url|urlencode }}" title="Comentários">💬{% if t.comentarios_count %}<span class="icon-count">{{ t.comentarios_count }}</span>{% endif %}</a>
+                  {% if pode_deletar %}<a class="card-icon-btn" href="{% url 'operacao:deletar' t.id %}?next={{ voltar_url|urlencode }}" title="Deletar">🗑️</a>{% endif %}
+                </div>
+                <div class="card-actions">
+                  <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="modal" data-bs-target="#modalReabrir{{ t.id }}">🔒 Reabrir</button>
+                </div>
+              </div>
+            </div>
+
+            {# Modal reabertura — exige senha admin #}
+            <div class="modal fade" id="modalReabrir{{ t.id }}" tabindex="-1">
+              <div class="modal-dialog">
+                <div class="modal-content">
+                  <div class="modal-header">
+                    <h5 class="modal-title">🔒 Reabrir card finalizado</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                  </div>
+                  <form method="post" action="{% url 'operacao:reabrir' t.id %}">
+                    {% csrf_token %}
+                    <input type="hidden" name="next" value="{{ voltar_url }}">
+                    <div class="modal-body">
+                      <p class="text-secondary small mb-3"><b>{{ t.codigo }}</b> — {{ t.titulo }}</p>
+                      <label class="form-label fw-semibold">Senha de reabertura <span class="text-danger">*</span></label>
+                      <input type="password" name="senha" class="form-control" autocomplete="off" required>
+                    </div>
+                    <div class="modal-footer">
+                      <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+                      <button type="submit" class="btn btn-secondary">Reabrir</button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            </div>
+          {% empty %}
+            <div class="empty-state" style="grid-column:1/-1"><div class="empty-icon">✅</div>Sem finalizadas nesse filtro.</div>
+          {% endfor %}
+        </div>
+      </div>

@@ -31,6 +31,7 @@
         <a class="navbar-brand d-flex align-items-center gap-2 m-0" href="{% url 'ambiente' %}">
           <span class="badge text-bg-light">DSR</span>
           <span>Credcom Hub</span>
+          {% if site_version %}<small class="opacity-75 fw-normal" style="font-size:11px;">v{{ site_version }}</small>{% endif %}
         </a>
 
         {% if user.is_authenticated %}
@@ -47,28 +48,33 @@
 
         {% if user.is_authenticated %}
 
-          {% if pode_ver_operacao %}
-            <a class="btn btn-light btn-sm" href="/operacao/">Operação</a>
-          {% endif %}
-
-          {% if pode_ver_painel_operacao %}
-            <a class="btn btn-light btn-sm" href="/operacao/painel/">Painel</a>
-          {% endif %}
-
-          {% if pode_ver_gestao %}
-            <a class="btn btn-light btn-sm" href="/gestao/">Gestão</a>
-          {% endif %}
-
-          {% if pode_ver_zapmsg %}
-            <a class="btn btn-light btn-sm" href="/zapmsg/">ZapMsg</a>
-          {% endif %}
-
-          {% if pode_ver_nibo %}
-            <a class="btn btn-light btn-sm" href="/nibo/">Nibo</a>
-          {% endif %}
-
-          {% if pode_ver_financeiro %}
-            <a class="btn btn-light btn-sm" href="{% url 'financeiro:financeiro' %}">Financeiro</a>
+          {# Menu de módulos — agrupa todos os ambientes que o usuário pode ver #}
+          {% if pode_ver_operacao or pode_ver_painel_operacao or pode_ver_gestao or pode_ver_zapmsg or pode_ver_nibo or pode_ver_financeiro %}
+            <div class="dropdown">
+              <button class="btn btn-light btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                ☰ Menu
+              </button>
+              <ul class="dropdown-menu dropdown-menu-end shadow">
+                {% if pode_ver_operacao %}
+                  <li><a class="dropdown-item" href="/operacao/">🧭 Operação</a></li>
+                {% endif %}
+                {% if pode_ver_painel_operacao %}
+                  <li><a class="dropdown-item" href="/operacao/painel/">📊 Painel Emissão</a></li>
+                {% endif %}
+                {% if pode_ver_gestao %}
+                  <li><a class="dropdown-item" href="/gestao/">📋 Gestão</a></li>
+                {% endif %}
+                {% if pode_ver_zapmsg %}
+                  <li><a class="dropdown-item" href="/zapmsg/">📱 ZapMsg</a></li>
+                {% endif %}
+                {% if pode_ver_nibo %}
+                  <li><a class="dropdown-item" href="/nibo/">💰 Nibo</a></li>
+                {% endif %}
+                {% if pode_ver_financeiro %}
+                  <li><a class="dropdown-item" href="{% url 'financeiro:financeiro' %}">💵 Financeiro</a></li>
+                {% endif %}
+              </ul>
+            </div>
           {% endif %}
 
           {# Chat habilitado #}

@@ -10,6 +10,7 @@ from django.contrib.auth.decorators import login_required
 from django.db.models import Count, Q
 from django.http import FileResponse, Http404, HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST, require_GET
 
@@ -176,11 +177,16 @@ def _build_base_filtrado(request):
 # QUADRO
 # ============================================================
 
-@login_required
-def quadro(request):
-    if not tem_acesso_gestao(request.user):
-        return HttpResponseForbidden("Sem acesso ao módulo Gestão.")
+def _voltar_url(request):
+    """URL do quadro (com filtros atuais) usada nos 'next' dos cards.
+    Reconstruída a partir de request.GET para ser igual tanto na página
+    cheia quanto no endpoint /partial/cards/ do auto-refresh."""
+    base = reverse("gestao:quadro")
+    qs = request.GET.urlencode()
+    return f"{base}?{qs}" if qs else base
 
+
+def _contexto_quadro(request):
     # Fecha automaticamente cards EXECUTADO que estouraram o prazo de validação.
     finalizar_executados_vencidos(Tarefa, Comentario)
 
@@ -282,8 +288,27 @@ def quadro(request):
         "pode_deletar":    pode_deletar(request.user),
         "pode_prioridade": pode_prioridade(request.user),
         "devolucao_form":  DevolucaoForm(),   # NOVO — usado nos cards pendentes
+        # URL canônica do quadro (não o endpoint /partial/cards/) para os
+        # campos "next" dos cards funcionarem mesmo após o auto-refresh.
+        "voltar_url": _voltar_url(request),
     }
-    return render(request, "gestao/gestao.html", ctx)
+    return ctx
+
+
+@login_required
+def quadro(request):
+    if not tem_acesso_gestao(request.user):
+        return HttpResponseForbidden("Sem acesso ao módulo Gestão.")
+    return render(request, "gestao/gestao.html", _contexto_quadro(request))
+
+
+@login_required
+@require_GET
+def partial_cards(request):
+    # Mesmos dados do quadro, mas só os cards (usado no auto-refresh sem F5).
+    if not tem_acesso_gestao(request.user):
+        return HttpResponseForbidden("Sem acesso ao módulo Gestão.")
+    return render(request, "gestao/partials/cards.html", _contexto_quadro(request))
 
 
 # ============================================================
