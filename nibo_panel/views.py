@@ -464,7 +464,8 @@ def enviar_remessa(request):
     - Cada registro é isolado em try/except — falha em um não para os outros.
     - Registros com falha exibem messages.error com o ID; os demais são processados.
     """
-    if not tem_acesso(request.user, "NIBO"):
+    from core import roles
+    if not roles.tem_acesso_nibo(request.user):
         return HttpResponseForbidden("Você não tem acesso ao módulo Nibo.")
 
     account_id = settings.NIBO_ACCOUNT_ID

@@ -368,3 +368,50 @@ class UsuarioRestricaoModulo(models.Model):
 
     def __str__(self):
         return f"{self.user.username} — bloqueado: {self.get_modulo_bloqueado_display()}"
+
+
+class UsuarioLiberacaoModulo(models.Model):
+    """
+    Whitelist de módulos por usuário — espelho de UsuarioRestricaoModulo.
+
+    Concede acesso a um módulo a um usuário específico MESMO que ele não
+    pertença ao grupo/cargo que normalmente daria esse acesso. Usado, por
+    exemplo, para liberar o módulo Gestão a algumas pessoas do cargo Jurídico.
+
+    Precedência:
+      - A liberação CONCEDE acesso ao módulo (fura a exigência de grupo).
+      - Um bloqueio (UsuarioRestricaoModulo) para o MESMO módulo tem
+        prioridade e continua negando — bloqueio vence liberação.
+      - Superuser nunca depende disso — já vê tudo.
+    """
+
+    # Reaproveita as mesmas opções de módulo da restrição.
+    Modulo = UsuarioRestricaoModulo.Modulo
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="liberacoes_modulo",
+        verbose_name="Usuário",
+    )
+    modulo_liberado = models.CharField(
+        max_length=30,
+        choices=Modulo.choices,
+        verbose_name="Módulo liberado",
+    )
+    motivo = models.CharField(
+        max_length=255,
+        blank=True,
+        verbose_name="Motivo (opcional)",
+        help_text="Registro interno — não exibido ao usuário.",
+    )
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Liberação de módulo por usuário"
+        verbose_name_plural = "Liberações de módulo por usuário"
+        unique_together = ("user", "modulo_liberado")
+        ordering = ["user__username", "modulo_liberado"]
+
+    def __str__(self):
+        return f"{self.user.username} — liberado: {self.get_modulo_liberado_display()}"

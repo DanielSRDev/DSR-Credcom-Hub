@@ -54,9 +54,9 @@ class TarefaAdmin(admin.ModelAdmin):
 
 @admin.register(OperacaoPermissaoUsuario)
 class OperacaoPermissaoUsuarioAdmin(admin.ModelAdmin):
-    list_display = ("user", "pode_criar_chamado_supervisor")
+    list_display = ("user", "bloquear_criar_chamado_supervisor")
     search_fields = ("user__username", "user__first_name", "user__last_name")
-    list_filter = ("pode_criar_chamado_supervisor",)
+    list_filter = ("bloquear_criar_chamado_supervisor",)
 
 
 admin.site.register(Comentario)

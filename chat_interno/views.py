@@ -97,7 +97,8 @@ def can_export_admin(user) -> bool:
         return False
     if user.is_superuser or user.is_staff:
         return True
-    return user.groups.filter(name="OPERACAO_CORDENACAO").exists()
+    from core import roles
+    return roles.ve_tudo(user)
 
 
 @login_required

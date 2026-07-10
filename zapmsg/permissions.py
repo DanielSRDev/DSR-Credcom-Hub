@@ -1,12 +1,9 @@
 from django.contrib.auth import get_user_model
 
-from chat_interno.models import ChatMonitorConfig, ChatVinculoOperador
+from chat_interno.models import ChatMonitorConfig
+from core import roles
 
 User = get_user_model()
-
-
-def _in_group(user, name: str) -> bool:
-    return user.groups.filter(name=name).exists()
 
 
 def can_monitor_all(user) -> bool:
@@ -18,7 +15,8 @@ def can_monitor_all(user) -> bool:
 
 
 def is_operacao_supervisor(user) -> bool:
-    return _in_group(user, "OPERACAO_SUPERVISOR")
+    """Líder de equipe (Gestor) — faz o papel de supervisor na Operação."""
+    return roles.is_gestor(user) or roles.ve_tudo(user)
 
 
 def allowed_target_users(user):
@@ -31,10 +29,8 @@ def allowed_target_users(user):
         return base.order_by("username", "id")
 
     if is_operacao_supervisor(user):
-        operador_ids = list(
-            ChatVinculoOperador.objects.filter(supervisor=user)
-            .values_list("operador_id", flat=True)
-        )
+        # Membros da equipe (fonte única: operacao.Equipe) + o próprio.
+        operador_ids = list(roles.membros_de(user).values_list("id", flat=True))
         ids = [user.id, *operador_ids]
         return base.filter(id__in=ids).distinct().order_by("username", "id")
 

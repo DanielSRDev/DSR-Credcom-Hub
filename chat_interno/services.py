@@ -5,7 +5,9 @@ from django.utils import timezone
 from django.contrib.auth import get_user_model
 from django.db.models import Q, Count
 
-from .models import Conversation, Message, MessageReaction, ChatVinculoOperador, ChatPresence, ChatBloqueio, ChatLiberacao, ChatLiberacaoGrupo
+from core import roles
+from core import grupos as G
+from .models import Conversation, Message, MessageReaction, ChatPresence, ChatBloqueio, ChatLiberacao, ChatLiberacaoGrupo
 
 User = get_user_model()
 
@@ -95,32 +97,34 @@ def allowed_contacts(user):
     # Bloqueios não se aplicam a pares com liberação explícita
     bloqueados_efetivos = bloqueados - liberados
 
-    is_coord = _in_group(user, "OPERACAO_CORDENACAO")
-    is_sup   = _in_group(user, "OPERACAO_SUPERVISOR")
-    is_oper  = _in_group(user, "OPERACAO")
-
-    # ── monta queryset por cargo ──────────────────────────────────────
-    if is_coord:
+    # ── monta queryset por cargo (modelo dos 6 cargos — ver core/roles.py) ──
+    if roles.ve_tudo(user):
+        # Diretoria / superuser: fala com todos.
         qs_cargo = qs_base
 
-    elif is_sup:
-        sup_ids   = User.objects.filter(groups__name="OPERACAO_SUPERVISOR").values_list("id", flat=True)
-        coord_ids = User.objects.filter(groups__name="OPERACAO_CORDENACAO").values_list("id", flat=True)
-        equipe_ids = ChatVinculoOperador.objects.filter(supervisor=user).values_list("operador_id", flat=True)
-        qs_cargo = qs_base.filter(
-            Q(id__in=sup_ids) | Q(id__in=coord_ids) | Q(id__in=equipe_ids)
-        ).distinct()
+    elif roles.is_gestor(user):
+        # Gestor: sua equipe + outros gestores + Diretoria.
+        ids = set(roles.membros_de(user).values_list("id", flat=True))
+        ids |= set(roles.usuarios_no_cargo(G.GESTAO_GESTOR, G.GESTAO).values_list("id", flat=True))
+        qs_cargo = qs_base.filter(id__in=ids)
 
-    elif is_oper:
-        coord_ids      = User.objects.filter(groups__name="OPERACAO_CORDENACAO").values_list("id", flat=True)
-        supervisor_ids = ChatVinculoOperador.objects.filter(operador=user).values_list("supervisor_id", flat=True)
+    elif roles.is_pos_acordo(user):
+        # Pós-acordo: todos da Operação + supervisores (gestor) + Diretoria.
+        ids = set(roles.usuarios_no_cargo(G.OPERACAO).values_list("id", flat=True))
+        ids |= set(roles.usuarios_no_cargo(G.GESTAO_GESTOR, G.GESTAO).values_list("id", flat=True))
+        qs_cargo = qs_base.filter(id__in=ids)
 
-        if not supervisor_ids:
-            qs_cargo = qs_base.filter(id__in=coord_ids)
-        else:
-            qs_cargo = qs_base.filter(
-                Q(id__in=supervisor_ids) | Q(id__in=coord_ids)
-            ).distinct()
+    elif roles.is_juridico(user):
+        # Jurídico: equipe do jurídico + todos gestores + Diretoria + equipe pós-acordo.
+        ids = set(roles.colegas_de_equipe(user).values_list("id", flat=True))
+        ids |= set(roles.usuarios_no_cargo(G.GESTAO_GESTOR, G.GESTAO, G.POS_ACORDO).values_list("id", flat=True))
+        qs_cargo = qs_base.filter(id__in=ids)
+
+    elif roles.is_operacao(user) or roles.is_financeiro(user):
+        # Operador / financeiro: supervisor direto + Diretoria + pós-acordo.
+        ids = set(roles.supervisores_de(user).values_list("id", flat=True))
+        ids |= set(roles.usuarios_no_cargo(G.GESTAO, G.POS_ACORDO).values_list("id", flat=True))
+        qs_cargo = qs_base.filter(id__in=ids)
 
     else:
         qs_cargo = qs_base.none()

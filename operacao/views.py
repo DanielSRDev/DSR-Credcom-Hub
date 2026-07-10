@@ -17,36 +17,42 @@ from django.views.decorators.http import require_POST, require_GET
 from core.decorators import user_in_groups
 from core.models import ConfiguracaoSeguranca
 from core.services import finalizar_executados_vencidos
+from core import roles
+from core.grupos import GESTAO, GESTAO_GESTOR, POS_ACORDO, OPERACAO, JURIDICO
 from .forms import TarefaForm, ComentarioForm, AnexoForm, DevolucaoForm
 from .models import Tarefa, Equipe, Comentario, Anexo, OperacaoPermissaoUsuario
 
 
 # ============================================================
-# RBAC
+# RBAC  (modelo dos 6 cargos — ver core/roles.py)
 # ============================================================
-
-def _in_group(user, group_name: str) -> bool:
-    if not user.is_authenticated:
-        return False
-    if user.is_superuser or user.is_staff:
-        return True
-    return user.groups.filter(name=group_name).exists()
+# Cargos que acessam o módulo Operação (gate dos decorators).
+CARGOS_OPERACAO = (GESTAO, GESTAO_GESTOR, POS_ACORDO, OPERACAO, JURIDICO)
+# Cargos com poderes de líder (editar / deletar / priorizar / reordenar).
+CARGOS_LIDER = (GESTAO, GESTAO_GESTOR)
 
 
 def is_coord(user) -> bool:
-    return _in_group(user, "OPERACAO_CORDENACAO")
+    """Compat: 'vê tudo' = Diretoria (GESTAO) ou superuser."""
+    return roles.ve_tudo(user)
 
 
 def is_supervisor(user) -> bool:
-    return _in_group(user, "OPERACAO_SUPERVISOR") or is_coord(user)
+    """Compat: líder de equipe (Gestor) — inclui quem vê tudo."""
+    return roles.is_gestor(user) or roles.ve_tudo(user)
 
 
 def is_operador(user) -> bool:
-    return _in_group(user, "OPERACAO") and not is_supervisor(user) and not is_coord(user)
+    """Operador comum: acessa Operação mas não é líder, pós-acordo nem vê tudo."""
+    return (
+        roles.tem_acesso_operacao(user)
+        and not is_supervisor(user)
+        and not roles.is_pos_acordo(user)
+    )
 
 
 def membros_da_equipe_do_supervisor(user):
-    return User.objects.filter(operacao_equipes__supervisores=user).distinct()
+    return roles.membros_de(user)
 
 
 def queryset_visivel_para(user):
@@ -99,14 +105,16 @@ def pode_validar(user, tarefa: Tarefa) -> bool:
 
 
 def operador_pode_criar(user):
-    if is_coord(user) or is_supervisor(user):
+    # Diretoria, gestor e pós-acordo sempre podem criar.
+    if roles.ve_tudo(user) or roles.is_gestor(user) or roles.is_pos_acordo(user):
         return True
-    if not is_operador(user):
+    # Operador comum (Operação/Jurídico): pode por padrão, salvo bloqueio individual.
+    if not roles.tem_acesso_operacao(user):
         return False
     permissao = getattr(user, "operacao_permissao", None)
     if permissao is None:
-        return True
-    return permissao.pode_criar_chamado_supervisor
+        return True  # sem registro = pode criar (padrão)
+    return not permissao.bloquear_criar_chamado_supervisor
 
 
 # ============================================================
@@ -249,13 +257,13 @@ def _contexto_quadro(request):
     return context
 
 
-@user_in_groups("OPERACAO", "OPERACAO_SUPERVISOR", "OPERACAO_CORDENACAO")
+@user_in_groups(*CARGOS_OPERACAO)
 @login_required
 def quadro(request):
     return render(request, "operacao/operacao.html", _contexto_quadro(request))
 
 
-@user_in_groups("OPERACAO", "OPERACAO_SUPERVISOR", "OPERACAO_CORDENACAO")
+@user_in_groups(*CARGOS_OPERACAO)
 @login_required
 @require_GET
 def partial_cards(request):
@@ -267,7 +275,7 @@ def partial_cards(request):
 # CRUD
 # ============================================================
 
-@user_in_groups("OPERACAO", "OPERACAO_SUPERVISOR", "OPERACAO_CORDENACAO")
+@user_in_groups(*CARGOS_OPERACAO)
 @login_required
 def tarefa_criar(request):
     if not operador_pode_criar(request.user):
@@ -286,7 +294,7 @@ def tarefa_criar(request):
     return render(request, "operacao/tarefa_form.html", {"form": form, "titulo": "Novo chamado"})
 
 
-@user_in_groups("OPERACAO_SUPERVISOR", "OPERACAO_CORDENACAO")
+@user_in_groups(*CARGOS_LIDER)
 @login_required
 def tarefa_editar(request, tarefa_id: int):
     qs = Tarefa.objects.all() if is_coord(request.user) else queryset_visivel_para(request.user)
@@ -303,7 +311,7 @@ def tarefa_editar(request, tarefa_id: int):
     return render(request, "operacao/tarefa_form.html", {"form": form, "titulo": "Editar chamado"})
 
 
-@user_in_groups("OPERACAO_SUPERVISOR", "OPERACAO_CORDENACAO")
+@user_in_groups(*CARGOS_LIDER)
 @login_required
 def tarefa_deletar(request, tarefa_id: int):
     qs = Tarefa.objects.all() if is_coord(request.user) else queryset_visivel_para(request.user)
@@ -320,7 +328,7 @@ def tarefa_deletar(request, tarefa_id: int):
 # STATUS
 # ============================================================
 
-@user_in_groups("OPERACAO_SUPERVISOR", "OPERACAO_CORDENACAO")
+@user_in_groups(*CARGOS_LIDER)
 @login_required
 @require_POST
 def toggle_prioridade(request, tarefa_id: int):
@@ -333,7 +341,7 @@ def toggle_prioridade(request, tarefa_id: int):
     return go_back(request)
 
 
-@user_in_groups("OPERACAO", "OPERACAO_SUPERVISOR", "OPERACAO_CORDENACAO")
+@user_in_groups(*CARGOS_OPERACAO)
 @login_required
 @require_POST
 def marcar_executando(request, tarefa_id: int):
@@ -349,7 +357,7 @@ def marcar_executando(request, tarefa_id: int):
     return go_back(request)
 
 
-@user_in_groups("OPERACAO", "OPERACAO_SUPERVISOR", "OPERACAO_CORDENACAO")
+@user_in_groups(*CARGOS_OPERACAO)
 @login_required
 @require_POST
 def marcar_executado(request, tarefa_id: int):
@@ -363,7 +371,7 @@ def marcar_executado(request, tarefa_id: int):
     return go_back(request)
 
 
-@user_in_groups("OPERACAO", "OPERACAO_SUPERVISOR", "OPERACAO_CORDENACAO")
+@user_in_groups(*CARGOS_OPERACAO)
 @login_required
 @require_POST
 def devolver_pendencia(request, tarefa_id: int):
@@ -395,7 +403,7 @@ def devolver_pendencia(request, tarefa_id: int):
     return go_back(request)
 
 
-@user_in_groups("OPERACAO", "OPERACAO_SUPERVISOR", "OPERACAO_CORDENACAO")
+@user_in_groups(*CARGOS_OPERACAO)
 @login_required
 @require_POST
 def confirmar_devolucao(request, tarefa_id: int):
@@ -426,7 +434,7 @@ def confirmar_devolucao(request, tarefa_id: int):
     return go_back(request)
 
 
-@user_in_groups("OPERACAO", "OPERACAO_SUPERVISOR", "OPERACAO_CORDENACAO")
+@user_in_groups(*CARGOS_OPERACAO)
 @login_required
 @require_POST
 def finalizar_reabrir(request, tarefa_id: int):
@@ -447,7 +455,7 @@ def finalizar_reabrir(request, tarefa_id: int):
     return go_back(request)
 
 
-@user_in_groups("OPERACAO", "OPERACAO_SUPERVISOR", "OPERACAO_CORDENACAO")
+@user_in_groups(*CARGOS_OPERACAO)
 @login_required
 @require_POST
 def reabrir(request, tarefa_id: int):
@@ -498,7 +506,7 @@ def reabrir(request, tarefa_id: int):
 # DETALHE / COMENTÁRIOS / ANEXOS
 # ============================================================
 
-@user_in_groups("OPERACAO", "OPERACAO_SUPERVISOR", "OPERACAO_CORDENACAO")
+@user_in_groups(*CARGOS_OPERACAO)
 @login_required
 def detalhe(request, tarefa_id: int):
     tarefa = get_object_or_404(
@@ -522,7 +530,7 @@ def detalhe(request, tarefa_id: int):
     })
 
 
-@user_in_groups("OPERACAO", "OPERACAO_SUPERVISOR", "OPERACAO_CORDENACAO")
+@user_in_groups(*CARGOS_OPERACAO)
 @login_required
 @require_POST
 def comentario_criar(request, tarefa_id: int):
@@ -536,7 +544,7 @@ def comentario_criar(request, tarefa_id: int):
     return go_back(request, fallback="operacao:detalhe")
 
 
-@user_in_groups("OPERACAO", "OPERACAO_SUPERVISOR", "OPERACAO_CORDENACAO")
+@user_in_groups(*CARGOS_OPERACAO)
 @login_required
 def anexos(request, tarefa_id: int):
     tarefa = get_object_or_404(queryset_visivel_para(request.user), id=tarefa_id)
@@ -546,7 +554,7 @@ def anexos(request, tarefa_id: int):
     })
 
 
-@user_in_groups("OPERACAO", "OPERACAO_SUPERVISOR", "OPERACAO_CORDENACAO")
+@user_in_groups(*CARGOS_OPERACAO)
 @login_required
 @require_POST
 def anexo_upload(request, tarefa_id: int):
@@ -562,7 +570,7 @@ def anexo_upload(request, tarefa_id: int):
     return go_back(request, fallback="operacao:anexos")
 
 
-@user_in_groups("OPERACAO", "OPERACAO_SUPERVISOR", "OPERACAO_CORDENACAO")
+@user_in_groups(*CARGOS_OPERACAO)
 @login_required
 def anexo_download(request, anexo_id: int):
     a = get_object_or_404(Anexo.objects.select_related("tarefa"), id=anexo_id)
@@ -576,7 +584,7 @@ def anexo_download(request, anexo_id: int):
 # REORDENAR — usa bulk_update (alinhado com Gestao)
 # ============================================================
 
-@user_in_groups("OPERACAO_SUPERVISOR", "OPERACAO_CORDENACAO")
+@user_in_groups(*CARGOS_LIDER)
 @login_required
 @require_POST
 def reordenar(request):

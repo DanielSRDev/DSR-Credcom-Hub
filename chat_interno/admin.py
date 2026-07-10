@@ -7,7 +7,6 @@ import csv
 from .models import (
     Conversation,
     Message,
-    ChatVinculoOperador,
     ChatMonitorConfig,
     ChatBloqueio,
     ChatLiberacao,
@@ -16,11 +15,9 @@ from .models import (
 
 User = get_user_model()
 
-
-@admin.register(ChatVinculoOperador)
-class ChatVinculoOperadorAdmin(admin.ModelAdmin):
-    list_display  = ("operador", "supervisor", "criado_em")
-    search_fields = ("operador__username", "supervisor__username")
+# ChatVinculoOperador foi APOSENTADO: a equipe (operador ↔ supervisor) passou a
+# ser cadastrada uma única vez em operacao.Equipe e é lida via core.roles.
+# O modelo/tabela ainda existem por compatibilidade, mas não são mais usados.
 
 
 @admin.register(Conversation)
@@ -106,30 +103,17 @@ class ChatMonitorConfigInline(admin.StackedInline):
     fields     = ("monitorado", "notificar_fone", "pode_enviar_massa")
 
 
-class ChatVinculoOperadorInline(admin.TabularInline):
-    """
-    Inline para gerenciar os vínculos operador -> supervisor(es)
-    diretamente na página do usuário no admin.
-    """
-    model        = ChatVinculoOperador
-    fk_name      = "operador"
-    extra        = 1
-    verbose_name = "Supervisor vinculado"
-    verbose_name_plural = "Supervisores vinculados"
-    raw_id_fields = ["supervisor"]
-
-
 try:
     admin.site.unregister(User)
 except admin.sites.NotRegistered:
     pass
 
 
-from core.admin import PerfilInline, RestricaoInline
+from core.admin import PerfilInline, RestricaoInline, LiberacaoInline
 
 @admin.register(User)
 class CustomUserAdmin(DjangoUserAdmin):
-    inlines = [PerfilInline, RestricaoInline, ChatMonitorConfigInline, ChatVinculoOperadorInline]
+    inlines = [PerfilInline, RestricaoInline, LiberacaoInline, ChatMonitorConfigInline]
 
 
 # ──────────────────────────────────────────────────────────────────────────────

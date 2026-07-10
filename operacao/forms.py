@@ -4,6 +4,7 @@ from django import forms
 from django.contrib.auth.models import User
 from django.utils import timezone
 
+from core import roles
 from .models import Tarefa, Comentario, Anexo, Equipe
 
 
@@ -11,33 +12,25 @@ PRAZO_MINIMO_HORAS = 1
 
 
 # =========================================================
-# CONTROLE DE GRUPOS
+# CONTROLE DE CARGOS (compat — ver core/roles.py)
 # =========================================================
-def _in_group(user, group_name: str) -> bool:
-    if not user or not user.is_authenticated:
-        return False
-    if user.is_superuser or user.is_staff:
-        return True
-    return user.groups.filter(name=group_name).exists()
-
-
 def is_coord(user) -> bool:
-    return _in_group(user, "OPERACAO_CORDENACAO")
+    """'Vê tudo' = Diretoria (GESTAO) ou superuser."""
+    return roles.ve_tudo(user)
 
 
 def is_supervisor(user) -> bool:
-    return _in_group(user, "OPERACAO_SUPERVISOR") or is_coord(user)
+    """Líder de equipe (Gestor) — inclui quem vê tudo."""
+    return roles.is_gestor(user) or roles.ve_tudo(user)
 
 
 def is_operador(user) -> bool:
-    if not user or not user.is_authenticated:
-        return False
-
-    # coordenação e supervisor não entram como operador
-    if is_coord(user) or is_supervisor(user):
-        return False
-
-    return _in_group(user, "OPERACAO")
+    """Operador comum: acessa Operação mas não é líder, pós-acordo nem vê tudo."""
+    return (
+        roles.tem_acesso_operacao(user)
+        and not is_supervisor(user)
+        and not roles.is_pos_acordo(user)
+    )
 
 
 # =========================================================
@@ -115,6 +108,15 @@ class TarefaForm(forms.ModelForm):
                 .order_by("username")
             )
             # ------------------------------------------------------------------
+            return
+
+        # =====================================================
+        # PÓS-ACORDO -> cria chamado para todos da Operação
+        # =====================================================
+        if roles.is_pos_acordo(user):
+            self.fields["atribuida_para"].queryset = (
+                roles.usuarios_no_cargo(*roles.CARGOS_OPERACAO).order_by("username")
+            )
             return
 
         # =====================================================

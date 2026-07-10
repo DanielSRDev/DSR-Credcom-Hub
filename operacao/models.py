@@ -217,9 +217,13 @@ class OperacaoPermissaoUsuario(models.Model):
         related_name="operacao_permissao",
         verbose_name="Usuário",
     )
-    pode_criar_chamado_supervisor = models.BooleanField(
-        default=True,
-        verbose_name="Pode criar chamado para o supervisor",
+    bloquear_criar_chamado_supervisor = models.BooleanField(
+        default=False,
+        verbose_name="Bloquear criação de chamado para o supervisor",
+        help_text=(
+            "Por padrão, todos podem criar chamado para o supervisor. "
+            "Marque para BLOQUEAR este usuário específico."
+        ),
     )
 
     class Meta:
@@ -227,5 +231,5 @@ class OperacaoPermissaoUsuario(models.Model):
         verbose_name_plural = "Permissões de usuários (Operação)"
 
     def __str__(self):
-        status = "SIM" if self.pode_criar_chamado_supervisor else "NÃO"
-        return f"{self.user.username} - criar chamado: {status}"
+        status = "BLOQUEADO" if self.bloquear_criar_chamado_supervisor else "PODE"
+        return f"{self.user.username} - criar chamado p/ supervisor: {status}"

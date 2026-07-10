@@ -25,27 +25,12 @@ from .services_acompanhamento import linked_credores_ids, montar_acompanhamento_
 
 
 
-GRUPOS_ACOMPANHAMENTO_GERAL = {
-    "GESTAO",
-    "GESTAO_GESTOR",
-    "GESTAO_GESTORA",
-    "GESTAO_USUARIO",
-    "SUPERVISAO",
-    "SUPERVISÃO",
-    "COORDENACAO",
-    "COORDENAÇÃO",
-    "SUPERVISOR",
-}
-
-
 def pode_acessar_acompanhamento_geral(user):
+    # Acompanhamento Geral: apenas Diretoria (GESTAO), Gestor ou superuser.
+    from core import roles
     if not user or not user.is_authenticated:
         return False
-
-    if user.is_superuser:
-        return True
-
-    return user.groups.filter(name__in=GRUPOS_ACOMPANHAMENTO_GERAL).exists()
+    return roles.ve_tudo(user) or roles.is_gestor(user)
 
 
 def zero_decimal(valor):
@@ -453,7 +438,9 @@ def exportar_excel_view(request):
 
         registros.append({
             "Data Referência": item.data_referencia,
-            "Data Acordo": item.data_acordo,
+            # "Data Acordo" = quando o acordo foi FEITO (emissão = evc_data).
+            # aco_data (item.data_acordo) é o vencimento, não a data de emissão.
+            "Data Acordo": item.data_emissao,
             "Data Emissão": item.data_emissao,
             "Número Acordo": item.numero_acordo,
             "Aco ID": item.aco_id,
@@ -710,6 +697,10 @@ def exportar_relatorio_geral_view(request):
     if credor:
         qs = qs.filter(credor=credor)
 
+    # Mesma regra do Acompanhamento Geral: só carteiras cadastradas em
+    # CarteiraSupervisor (ativa). Credor "fora do padrão" não entra na planilha.
+    qs = qs.filter(cre_id__in=linked_credores_ids())
+
     registros = list(
         qs.values(
             "origem_registro",
@@ -859,7 +850,11 @@ def exportar_relatorio_geral_view(request):
             "tipo_contrato": "Tipo do Contrato",
             "numero_acordo": "Nr Acordo",
             "tipo_negociacao": "Tipo de Negociação",
-            "data_acordo": "Data Acordo",
+            # "Data Acordo" = quando o acordo foi FEITO (emissão / evento = evc_data).
+            # aco_data NÃO é a data de emissão: é o vencimento/data de referência do
+            # acordo (fica na coluna "Data Vecto Parcela" abaixo).
+            "data_emissao": "Data Acordo",
+            "data_acordo": "Data Vecto Parcela",
             "status_real": "Status",
             "honorario_liquido": "Vlr. Honorário Acordo",
             "valor_total_acordo": "Vlr. Total Acordo",
@@ -869,7 +864,12 @@ def exportar_relatorio_geral_view(request):
             "data_pagamento": "Data Pagto Parcela",
         })
 
-        df["Data Vecto Parcela"] = df["Data Acordo"] if "Data Acordo" in df.columns else ""
+        # "Data Acordo" (emissão) e "Data Vecto Parcela" (vencimento) já vêm do
+        # rename acima. Garante que existam mesmo com DataFrame vazio.
+        if "Data Acordo" not in df.columns:
+            df["Data Acordo"] = ""
+        if "Data Vecto Parcela" not in df.columns:
+            df["Data Vecto Parcela"] = ""
 
         colunas_exportacao = [
             "Cód. Contratante",
@@ -989,9 +989,18 @@ def atualizar_view(request):
 
 def aplicar_filtros_acompanhamento(request):
     hoje = date.today()
+
+    # Período padrão = MESMO do sync/planilha (Configuração do Painel), para o
+    # Acompanhamento bater com a planilha. Se usasse "até hoje", os acordos a
+    # vencer com Data Acordo futura (ex.: 15/07) ficariam de fora e o A Vencer
+    # apareceria menor que o da planilha (que cobre o mês inteiro).
+    config = PainelConfiguracao.objects.filter(ativo=True).first()
+    default_ini = (config.sync_data_ini if config and config.sync_data_ini else None) or date(hoje.year, hoje.month, 1)
+    default_fim = (config.sync_data_fim if config and config.sync_data_fim else None) or hoje
+
     dados_iniciais = {
-        "data_ini": request.GET.get("data_ini") or date(hoje.year, hoje.month, 1),
-        "data_fim": request.GET.get("data_fim") or hoje,
+        "data_ini": request.GET.get("data_ini") or default_ini,
+        "data_fim": request.GET.get("data_fim") or default_fim,
         "supervisor": request.GET.get("supervisor") or "",
         "operador": request.GET.get("operador") or "",
         "credor": request.GET.get("credor") or "",
@@ -999,8 +1008,8 @@ def aplicar_filtros_acompanhamento(request):
 
     form = AcompanhamentoGeralFiltroForm(dados_iniciais or None)
 
-    data_ini = date(hoje.year, hoje.month, 1)
-    data_fim = hoje
+    data_ini = default_ini
+    data_fim = default_fim
     supervisor = None
     operador = ""
     credor = ""
@@ -1187,7 +1196,9 @@ def exportar_acompanhamento_geral_view(request):
             "Origem": item.origem_registro,
             "Status Real": status_real,
             "Data Referência": item.data_referencia,
-            "Data Acordo": item.data_acordo,
+            # "Data Acordo" = quando o acordo foi FEITO (emissão = evc_data).
+            # aco_data (item.data_acordo) é o vencimento, não a data de emissão.
+            "Data Acordo": item.data_emissao,
             "Data Emissão": item.data_emissao,
             "Data Pagamento": item.data_pagamento,
             "Número Acordo": item.numero_acordo,

@@ -516,10 +516,16 @@ def criar_registros_relatorio_a_partir_painel(itens_painel):
         # (cobre PAGO_SEM_BAIXA_REAL onde não existe tb_pagamento correspondente).
         data_pagamento_hub = mapa_data_pagamento.get(item.aco_id)
 
+        # data_referencia = âncora do período do relatório = DATA ACORDO.
+        # (Antes usava item.data_referencia = data do evento de emissão, que
+        # diverge da Data Acordo e fazia o Acompanhamento — que filtra por
+        # data_referencia — mostrar totais diferentes da planilha.)
+        data_referencia_hub = item.data_acordo.date() if item.data_acordo else item.data_referencia
+
         registros.append(
             PainelOperacaoRelatorioGeral(
                 origem_registro="HUB",
-                data_referencia=item.data_referencia,
+                data_referencia=data_referencia_hub,
                 data_acordo=item.data_acordo,
                 data_emissao=item.data_emissao,
                 data_pagamento=data_pagamento_hub,
@@ -895,12 +901,34 @@ def sincronizar_relatorio_geral(data_ini=None, data_fim=None):
     )
 
     try:
-        base_hub = list(
-            PainelOperacaoRegistro.objects.filter(
-                data_referencia__gte=data_ini,
-                data_referencia__lte=data_fim,
-            )
+        # Âncora do período = DATA ACORDO (aco_data), NÃO a data do evento de
+        # emissão. Dois motivos:
+        #  - o evento pode escorregar para o mês seguinte (acordo 30/06, evento 01/07);
+        #  - o evento pode ser do mês anterior (acordo 01/07, evento 25/06).
+        # A base do painel (PainelOperacaoRegistro) é ancorada na EMISSÃO, então
+        # não serve aqui — ela perde acordos cuja Data Acordo está no mês mas o
+        # evento não. Por isso rodamos a MESMA query do painel numa janela mais
+        # larga (em memória, sem tocar na base do painel/Acompanhamento) e
+        # filtramos por Data Acordo no período.
+        data_ini_larga = data_ini - timedelta(days=60)
+        data_limite_vencimento = ultimo_dia_mes(data_fim)
+        registros_acordo_raw = executar_query(
+            SQL_PAINEL_OPERACAO,
+            [data_ini_larga, data_fim, data_limite_vencimento],
         )
+        registros_pagamento_raw = executar_query(
+            SQL_PAGAMENTOS_ACORDO, [data_ini_larga, data_fim]
+        )
+        aco_ids_pagos = {
+            normalizar_bigint(item.get("aco_id"))
+            for item in registros_pagamento_raw
+            if normalizar_bigint(item.get("aco_id")) is not None
+        }
+        base_hub_all = criar_registros_locais(registros_acordo_raw, aco_ids_pagos)
+        base_hub = [
+            r for r in base_hub_all
+            if r.data_acordo and data_ini <= r.data_acordo.date() <= data_fim
+        ]
 
         base_hub_consolidada = consolidar_itens_painel_para_relatorio(base_hub)
 

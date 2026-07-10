@@ -14,8 +14,10 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST, require_GET
 
-from core.models import ConfiguracaoSeguranca
+from core.models import ConfiguracaoSeguranca, UsuarioLiberacaoModulo
 from core.services import finalizar_executados_vencidos
+from core import roles
+from core.grupos import GESTAO, GESTAO_GESTOR
 from .forms import TarefaForm, ComentarioForm, AnexoForm, DevolucaoForm
 from .models import Tarefa, Comentario, Anexo
 
@@ -24,8 +26,14 @@ User = get_user_model()
 # ============================================================
 # RBAC
 # ============================================================
+# Modelo dos 6 cargos:
+#   - GESTAO (Diretoria) / superuser  -> vê e edita TUDO.
+#   - GESTAO_GESTOR                   -> participa do módulo (vê os cards ligados
+#                                        a ele e cria para outros), NÃO edita o
+#                                        quadro inteiro.
+#   - Liberação individual (ex.: Jurídico) -> acessa o módulo como participante.
 
-GESTAO_GROUPS = ["GESTAO", "GESTAO_USUARIO", "GESTAO_GESTOR", "GESTAO_GESTORA"]
+GESTAO_CARGOS = [GESTAO, GESTAO_GESTOR]
 
 
 def in_group(user, group_name: str) -> bool:
@@ -39,19 +47,15 @@ def in_group(user, group_name: str) -> bool:
 def tem_acesso_gestao(user) -> bool:
     if not user.is_authenticated:
         return False
-    if user.is_superuser:
+    if roles.tem_acesso_gestao(user):
         return True
-    return user.groups.filter(name__in=GESTAO_GROUPS).exists()
+    # liberação individual de módulo (whitelist) — ex.: pessoa do Jurídico
+    return UsuarioLiberacaoModulo.objects.filter(user=user, modulo_liberado="gestao").exists()
 
 
 def pode_editar(user) -> bool:
-    if not user.is_authenticated:
-        return False
-    if user.is_superuser:
-        return True
-    if in_group(user, "GESTAO_GESTORA") or in_group(user, "GESTAO_GESTOR"):
-        return True
-    return user.has_perm("Gestao.change_tarefa") or user.has_perm("gestao.change_tarefa")
+    # Edição/visão total do quadro: apenas Diretoria (GESTAO) ou superuser.
+    return roles.ve_tudo(user)
 
 
 def pode_criar(user) -> bool:
@@ -63,9 +67,7 @@ def pode_prioridade(user) -> bool:
 
 
 def pode_deletar(user) -> bool:
-    if not user.is_authenticated:
-        return False
-    return user.is_superuser or in_group(user, "GESTAO_GESTORA")
+    return roles.ve_tudo(user)
 
 
 def pode_ver_tarefa(user, tarefa: Tarefa) -> bool:
@@ -266,7 +268,7 @@ def _contexto_quadro(request):
 
     usuarios = (
         User.objects.filter(is_active=True)
-        .filter(Q(is_superuser=True) | Q(groups__name__in=GESTAO_GROUPS))
+        .filter(Q(is_superuser=True) | Q(groups__name__in=GESTAO_CARGOS))
         .distinct()
         .order_by("username")
     )
@@ -351,7 +353,7 @@ def editar(request, pk: int):
 def deletar(request, pk: int):
     tarefa = get_object_or_404(Tarefa, pk=pk)
     if not pode_deletar(request.user):
-        return HttpResponseForbidden("Somente superuser ou GESTAO_GESTORA pode deletar.")
+        return HttpResponseForbidden("Somente a Diretoria (GESTAO) ou superuser pode deletar.")
     if request.method == "POST":
         tarefa.soft_delete(request.user)
         return redirect(_next_or(request, "/gestao/"))

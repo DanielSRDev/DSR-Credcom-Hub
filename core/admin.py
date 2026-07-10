@@ -14,6 +14,7 @@ from .models import (
     JornalComentario,
     PerfilUsuario,
     UsuarioRestricaoModulo,
+    UsuarioLiberacaoModulo,
 )
 
 logger = logging.getLogger("core.admin")
@@ -35,10 +36,19 @@ class RestricaoInline(admin.TabularInline):
     readonly_fields = ("criado_em",)
 
 
+class LiberacaoInline(admin.TabularInline):
+    model = UsuarioLiberacaoModulo
+    extra = 1
+    fields = ("modulo_liberado", "motivo", "criado_em")
+    readonly_fields = ("criado_em",)
+    verbose_name = "Liberação de módulo (whitelist)"
+    verbose_name_plural = "Liberações de módulo (libera módulo individualmente)"
+
+
 # ── User Admin customizado ────────────────────────────────────────────────────
 
 class CustomUserAdmin(BaseUserAdmin):
-    inlines = [PerfilInline, RestricaoInline]
+    inlines = [PerfilInline, RestricaoInline, LiberacaoInline]
     actions = ["marcar_primeiro_acesso", "desmarcar_primeiro_acesso"]
     list_display = BaseUserAdmin.list_display + ("status_primeiro_acesso",)
 
@@ -137,6 +147,49 @@ class UsuarioRestricaoModuloAdmin(admin.ModelAdmin):
             '<span style="background:{};color:#fff;padding:2px 8px;border-radius:4px;font-size:12px">{}</span>',
             cor,
             obj.get_modulo_bloqueado_display(),
+        )
+
+
+@admin.register(UsuarioLiberacaoModulo)
+class UsuarioLiberacaoModuloAdmin(admin.ModelAdmin):
+    list_display = ("usuario_display", "modulo_display", "motivo", "criado_em")
+    list_filter = ("modulo_liberado",)
+    search_fields = ("user__username", "user__first_name", "user__last_name", "motivo")
+    autocomplete_fields = ("user",)
+    readonly_fields = ("criado_em",)
+    ordering = ("user__username", "modulo_liberado")
+
+    fieldsets = (
+        (None, {
+            "fields": ("user", "modulo_liberado", "motivo"),
+        }),
+        ("Auditoria", {
+            "fields": ("criado_em",),
+            "classes": ("collapse",),
+        }),
+    )
+
+    @admin.display(description="Usuário", ordering="user__username")
+    def usuario_display(self, obj):
+        nome = obj.user.get_full_name() or obj.user.username
+        return format_html("<strong>{}</strong> <small>({})</small>", nome, obj.user.username)
+
+    @admin.display(description="Módulo liberado")
+    def modulo_display(self, obj):
+        cores = {
+            "nibo":            "#0284c7",
+            "gestao":          "#7c3aed",
+            "operacao":        "#1d4ed8",
+            "zapmsg":          "#b45309",
+            "painel_operacao": "#374151",
+            "chat":            "#065f46",
+            "financeiro":      "#047857",
+        }
+        cor = cores.get(obj.modulo_liberado, "#6b7280")
+        return format_html(
+            '<span style="background:{};color:#fff;padding:2px 8px;border-radius:4px;font-size:12px">✓ {}</span>',
+            cor,
+            obj.get_modulo_liberado_display(),
         )
 
 

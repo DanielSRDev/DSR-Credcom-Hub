@@ -2,6 +2,8 @@ from django.http import HttpResponseForbidden
 from django.contrib.auth.views import redirect_to_login
 from django.shortcuts import redirect
 
+from core import grupos
+
 PRIMEIRO_ACESSO_URL = "/accounts/primeiro-acesso/"
 
 # Rotas liberadas mesmo quando deve_trocar_senha = True
@@ -29,20 +31,18 @@ class ModuleGroupAccessMiddleware:
     - então /zapmsg/webhook/ NÃO pode passar por login/grupo
     """
 
+    # Cargos por módulo (modelo dos 6 cargos). Liberação individual (whitelist)
+    # complementa estas regras; bloqueio individual sempre vence.
+    # A regra mais específica (/operacao/painel/) tem precedência sobre /operacao/.
     RULES = {
-        "/nibo/":     {"NIBO"},
-        "/gestao/":   {"GESTAO", "GESTAO_GESTOR", "GESTAO_GESTORA", "GESTAO_USUARIO"},
-        "/operacao/": {"OPERACAO", "OPERACAO_CORDENACAO", "OPERACAO_SUPERVISOR"},
-        "/zapmsg/": {
-            "GESTAO_GESTOR",
-            "GESTAO_GESTORA",
-            "GESTAO_USUARIO",
-            "OPERACAO",
-            "OPERACAO_CORDENACAO",
-            "OPERACAO_SUPERVISOR",
-        },
-        "/chat/": set(),  # acesso livre para autenticados — sem grupo exigido
-        "/financeiro/": {"FINANCEIRO", "GESTAO_GESTORA"},
+        "/nibo/":            {grupos.GESTAO, grupos.FINANCEIRO},
+        "/gestao/":          {grupos.GESTAO, grupos.GESTAO_GESTOR},
+        "/operacao/painel/": {grupos.GESTAO, grupos.GESTAO_GESTOR, grupos.OPERACAO},
+        "/operacao/":        {grupos.GESTAO, grupos.GESTAO_GESTOR, grupos.POS_ACORDO,
+                              grupos.OPERACAO, grupos.JURIDICO},
+        "/zapmsg/":          {grupos.GESTAO, grupos.GESTAO_GESTOR, grupos.OPERACAO},
+        "/chat/":            set(),  # acesso livre para autenticados — sem grupo exigido
+        "/financeiro/":      {grupos.GESTAO, grupos.FINANCEIRO},
     }
 
     # Mapeamento prefixo → chave do Modulo em UsuarioRestricaoModulo
@@ -80,6 +80,19 @@ class ModuleGroupAccessMiddleware:
             modulo_bloqueado=modulo_key,
         ).exists()
 
+    def _modulo_liberado_para(self, user, modulo_key: str) -> bool:
+        """
+        Retorna True se o usuário tem liberação individual (whitelist) para o
+        módulo — concede acesso mesmo sem o grupo. Bloqueio vence liberação.
+        """
+        if not modulo_key:
+            return False
+        from core.models import UsuarioLiberacaoModulo
+        return UsuarioLiberacaoModulo.objects.filter(
+            user=user,
+            modulo_liberado=modulo_key,
+        ).exists()
+
     def _get_modulo_key(self, path: str) -> str | None:
         """
         Retorna a chave de módulo mais específica que corresponde ao path.
@@ -113,9 +126,11 @@ class ModuleGroupAccessMiddleware:
             except Exception:
                 pass  # perfil ainda não criado → deixa passar normalmente
 
-        for prefix, allowed_groups in self.RULES.items():
+        # Avalia o prefixo MAIS específico primeiro (/operacao/painel/ antes de /operacao/).
+        for prefix in sorted(self.RULES, key=len, reverse=True):
             if not path.startswith(prefix):
                 continue
+            allowed_groups = self.RULES[prefix]
 
             user = request.user
 
@@ -127,12 +142,18 @@ class ModuleGroupAccessMiddleware:
             if user.is_superuser:
                 return self.get_response(request)
 
-            # --- camada 1: grupo ---
-            if allowed_groups and not user.groups.filter(name__in=list(allowed_groups)).exists():
+            modulo_key = self._get_modulo_key(path)
+
+            # --- camada 1: grupo OU liberação individual (whitelist) ---
+            em_grupo = (
+                not allowed_groups
+                or user.groups.filter(name__in=list(allowed_groups)).exists()
+            )
+            liberado = self._modulo_liberado_para(user, modulo_key)
+            if not em_grupo and not liberado:
                 return HttpResponseForbidden("Sem permissão para acessar este módulo.")
 
-            # --- camada 2: restrição individual por usuário ---
-            modulo_key = self._get_modulo_key(path)
+            # --- camada 2: restrição individual por usuário (bloqueio vence) ---
             if modulo_key and self._modulo_bloqueado_para(user, modulo_key):
                 return HttpResponseForbidden(
                     "Seu acesso a este módulo foi restrito pelo administrador."

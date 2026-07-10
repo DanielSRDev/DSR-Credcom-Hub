@@ -678,11 +678,13 @@ LEFT JOIN valores_por_negociacao vpn
 
 WHERE pg.rn = 1
 
-  -- pagamento no mês atual, mas emissão fora do período atual
+  -- Pago no mês atual, mas com DATA ACORDO fora do período (acordo feito em
+  -- mês anterior e pago agora). A âncora é aco_data — igual à base HUB — para
+  -- não duplicar acordos cuja Data Acordo já está no período.
   AND (
-      ev.evc_data IS NULL
-      OR ev.evc_data < per.data_ini
-      OR ev.evc_data >= DATEADD(DAY, 1, per.data_fim)
+      b.aco_data IS NULL
+      OR b.aco_data < per.data_ini
+      OR b.aco_data >= DATEADD(DAY, 1, per.data_fim)
   )
 
 ORDER BY
