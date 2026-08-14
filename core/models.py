@@ -340,6 +340,7 @@ class UsuarioRestricaoModulo(models.Model):
         PAINEL_OPERACAO = "painel_operacao", "Painel Operação"
         CHAT            = "chat",            "Chat Interno"
         FINANCEIRO      = "financeiro",      "Financeiro"
+        PLANILHA        = "planilha",        "Planilha"
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,

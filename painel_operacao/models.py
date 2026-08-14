@@ -300,6 +300,15 @@ class PainelOperacaoRelatorioGeral(models.Model):
     valor_entrada = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     valor_pagamento_periodo = models.DecimalField(max_digits=14, decimal_places=2, default=0)
 
+    # Só preenchidos hoje pra origem_registro="VIRTUA" (via OPERACOES.PRAZOPERMPARC).
+    # Mutuamente exclusivos: só um dos dois vem preenchido, conforme tipo_negociacao.
+    valor_recuperado_parcelamento = models.DecimalField(
+        "Valor Recuperado Parcelamento", max_digits=14, decimal_places=2, null=True, blank=True
+    )
+    valor_recuperado_refinanciamento = models.DecimalField(
+        "Valor Recuperado Refinanciamento", max_digits=14, decimal_places=2, null=True, blank=True
+    )
+
     qtd_parcelas_acordo = models.IntegerField(default=0)
     status_acordo = models.CharField(max_length=255, blank=True, default="")
     tipo_acordo = models.CharField(max_length=255, blank=True, default="")

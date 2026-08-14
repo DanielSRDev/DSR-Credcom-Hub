@@ -82,6 +82,18 @@
         </div>
       </div>
       {% endif %}
+
+      {% if pode_ver_planilha %}
+      <div class="col-md-6 col-lg-4">
+        <div class="card shadow-sm h-100" style="border-radius:16px;">
+          <div class="card-body p-4">
+            <h4 class="mb-2">🗂️ Planilha</h4>
+            <p class="text-secondary">Base de clientes por operador, com filtros e prioridade.</p>
+            <a class="btn btn-primary" href="{% url 'planilha:index' %}">Entrar na Planilha</a>
+          </div>
+        </div>
+      </div>
+      {% endif %}
     </div>
   </div>
 </div>

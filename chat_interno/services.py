@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import timedelta, datetime, time
 from django.utils import timezone
 from django.contrib.auth import get_user_model
 from django.db.models import Q, Count
@@ -237,6 +237,36 @@ def list_messages_between(me, other, limit=None, before_id=None, after_id=None):
 
     msgs = list(qs.order_by("criado_em"))
     return msgs, conv, False
+
+
+def list_messages_for_range(me, other, start_day, end_day):
+    """
+    Retorna (msgs, conv, baseline_id) com as mensagens entre start_day e
+    end_day (ambos inclusive, fuso horário local), em ordem cronológica.
+    Com start_day == end_day, é o comportamento de "um dia específico" que
+    já existia antes.
+
+    baseline_id é o maior id de mensagem anterior ao início do período
+    (0 se não houver nenhuma) — usado pelo polling para saber a partir de
+    que id considerar "mensagem nova" quando o período consultado é (ou
+    inclui) hoje e ainda está vazio.
+    """
+    if end_day < start_day:
+        start_day, end_day = end_day, start_day
+
+    conv = _get_or_create_conversation(me, other)
+    tz = timezone.get_current_timezone()
+    start = timezone.make_aware(datetime.combine(start_day, time.min), tz)
+    end = timezone.make_aware(datetime.combine(end_day, time.min), tz) + timedelta(days=1)
+
+    qs = conv.messages.select_related("sender", "reply_to__sender").prefetch_related("reactions")
+    msgs = list(qs.filter(criado_em__gte=start, criado_em__lt=end).order_by("criado_em"))
+
+    baseline_id = (
+        conv.messages.filter(criado_em__lt=start).order_by("-id").values_list("id", flat=True).first()
+        or 0
+    )
+    return msgs, conv, baseline_id
 
 
 # ==========

@@ -1,6 +1,7 @@
 from django.http import HttpResponseForbidden
 from core.permissions import tem_acesso
 
+import threading
 from datetime import datetime, timedelta, date
 from decimal import Decimal, ROUND_HALF_UP
 import unicodedata
@@ -23,6 +24,7 @@ from .services.nibo import (
     map_costcenter_by_id_cob,
     only_digits,
 )
+from .services.remessa import adquirir_lock_envio, liberar_lock_envio, gravar_log_execucao
 
 # ============================================================
 # CONFIG CODIGO VB
@@ -477,7 +479,6 @@ def enviar_remessa(request):
     ids_despesa      = [int(x) for x in request.POST.getlist("despesa_ids")]
 
     CC_PADRAO = request.POST.get("cc_padrao") or None
-    processados = 0
 
     # ----------- checagem de reenvio (registros já enviados) -----------
     def _ids_ja_enviados(table: str, ids: list[int]) -> list[int]:
@@ -515,6 +516,93 @@ def enviar_remessa(request):
         if not senha_correta or reenvio_senha != senha_correta:
             messages.error(request, "Senha de autorização para reenvio inválida.")
             return redirect("nibo_panel:painel")
+
+    total_selecionado = (
+        len(ids_repasse) + len(ids_repassevr) + len(ids_contapagar)
+        + len(ids_contareceber) + len(ids_despesa)
+    )
+    if total_selecionado == 0:
+        messages.warning(request, "Nenhum registro selecionado.")
+        return redirect("nibo_panel:painel")
+
+    # Lock em arquivo (mesmo usado pelo job automatico das 9h): evita que o
+    # envio manual rode ao mesmo tempo que o automatico, ou que dois cliques/
+    # usuarios disparem envios simultaneos — foi exatamente essa sobreposicao
+    # que fez lancamentos serem mandados 2x/3x pro Nibo em jul/2026.
+    if not adquirir_lock_envio():
+        messages.warning(
+            request,
+            "⏳ Já existe um envio em andamento (automático das 9h ou de outro usuário). "
+            "Aguarde alguns minutos e recarregue a página antes de tentar de novo — "
+            "reenviar agora duplicaria os lançamentos no Nibo."
+        )
+        return redirect("nibo_panel:painel")
+
+    # Roda em segundo plano: mandar muitos registros e sequencial (uma
+    # chamada HTTP por vez pro Nibo) e pode passar de 1-2 minutos, o que
+    # estourava o timeout do proxy/servidor e dava erro no navegador mesmo
+    # quando o envio continuava (ou terminava) por trás. Mesma ideia do botão
+    # "Atualizar dados" do Painel de Operação.
+    threading.Thread(
+        target=_rodar_envio_manual_bg,
+        args=(account_id, CC_PADRAO, ids_repasse, ids_repassevr, ids_contapagar, ids_contareceber, ids_despesa),
+        daemon=True,
+    ).start()
+
+    messages.success(
+        request,
+        f"🔄 Envio iniciado em segundo plano ({total_selecionado} registro(s) selecionado(s)). "
+        f"Aguarde 1–2 minutos e recarregue a página para conferir a coluna 'enviado'."
+    )
+    return redirect("nibo_panel:painel")
+
+
+def _rodar_envio_manual_bg(account_id, cc_padrao, ids_repasse, ids_repassevr, ids_contapagar, ids_contareceber, ids_despesa):
+    """
+    Executa o envio manual de fato, fora do ciclo request/response (por isso
+    nao pode usar django.contrib.messages, que so grava na sessao antes da
+    resposta ser enviada). Sempre libera o lock de envio no final, mesmo se
+    algo quebrar no meio.
+    """
+    try:
+        msgs, processados = _enviar_selecionados_bg(
+            account_id, cc_padrao, ids_repasse, ids_repassevr, ids_contapagar, ids_contareceber, ids_despesa,
+        )
+        linhas = [
+            f"[{datetime.now():%d/%m/%Y %H:%M:%S}] Envio manual (painel) | "
+            f"Processados: {processados} | Avisos: {len(msgs.avisos)} | Erros: {len(msgs.erros)}",
+            "", "AVISOS/PULADOS:",
+        ]
+        linhas += [f"  {a}" for a in msgs.avisos] or ["  (nenhum)"]
+        linhas += ["", "ERROS:"]
+        linhas += [f"  {e}" for e in msgs.erros] or ["  (nenhum)"]
+        gravar_log_execucao(linhas, prefixo="remessa_manual")
+    finally:
+        liberar_lock_envio()
+
+
+class _ColetorMsgs:
+    """
+    Substitui django.contrib.messages quando o envio roda em segundo plano: a
+    resposta HTTP ja foi enviada nesse ponto, entao messages.* nao teria
+    sessao/request para gravar. Mantem a MESMA assinatura (metodo(request,
+    msg)) usada no corpo original para nao precisar mexer em cada chamada.
+    """
+    def __init__(self):
+        self.avisos = []
+        self.erros = []
+
+    def warning(self, _request, msg):
+        self.avisos.append(str(msg))
+
+    def error(self, _request, msg):
+        self.erros.append(str(msg))
+
+
+def _enviar_selecionados_bg(account_id, CC_PADRAO, ids_repasse, ids_repassevr, ids_contapagar, ids_contareceber, ids_despesa):
+    messages = _ColetorMsgs()
+    request = None
+    processados = 0
 
     def get_by_id(table: str, _id: int):
         pk = PK_COL[table]
@@ -843,5 +931,4 @@ def enviar_remessa(request):
         except Exception as e:
             messages.error(request, f"tb_despesa id={row['id']} falhou: {e}")
 
-    messages.success(request, f"Remessa enviada. Registros processados: {processados}.")
-    return redirect("nibo_panel:painel")
+    return messages, processados

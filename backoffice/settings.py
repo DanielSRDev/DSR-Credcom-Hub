@@ -40,7 +40,7 @@ CSRF_TRUSTED_ORIGINS = [
 ]
 
 # Versão exibida na navbar (Credcom Hub). Alterar aqui em cada release.
-SITE_VERSION = "0.1.10"
+SITE_VERSION = "0.1.18"
 
 
 # Application definition
@@ -62,6 +62,7 @@ INSTALLED_APPS = [
     'zapmsg',
     "painel_operacao",
     "financeiro",
+    "planilha",
 ]
 
 MIDDLEWARE = [
@@ -214,4 +215,16 @@ FILE_UPLOAD_MAX_MEMORY_SIZE = 80 * 1024 * 1024  # 80 MB
 # Desligado por padrão: ligue só depois de validar com --dry-run no servidor.
 NIBO_AUTO_ENVIO_ATIVO = os.getenv("NIBO_AUTO_ENVIO_ATIVO", "0") == "1"
 NIBO_AUTO_ENVIO_HORA = int(os.getenv("NIBO_AUTO_ENVIO_HORA", "9"))  # hora (0-23)
+
+# Banco Firebird do sistema legado Virtua (cobrança) — usado só para ler o
+# último evento de cobrança de cada contrato (módulo Planilha, "Status Atual").
+VIRTUA_FIREBIRD = {
+    "HOST": "192.168.0.201",
+    "DATABASE": r"E:\Dados_Interbase\COB_DB.FDB",
+    "USER": "CONSULTA",
+    "PASSWORD": "CREDCOM1523",
+    "CHARSET": "WIN1252",
+}
+PLANILHA_SYNC_STATUS_ATIVO = os.getenv("PLANILHA_SYNC_STATUS_ATIVO", "1") == "1"
+PLANILHA_SYNC_STATUS_MINUTOS = int(os.getenv("PLANILHA_SYNC_STATUS_MINUTOS", "60"))
 

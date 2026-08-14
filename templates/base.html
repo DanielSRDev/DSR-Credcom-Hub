@@ -9,10 +9,10 @@
 
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
   <link rel="stylesheet" href="{% static 'css/painel.css' %}">
-  <link rel="stylesheet" href="{% static 'css/chat_interno.css' %}">
+  <link rel="stylesheet" href="{% static 'css/chat_interno.css' %}?v={{ site_version }}">
 
   <link rel="stylesheet" href="{% static 'css/painel.css' %}">
-  <link rel="stylesheet" href="{% static 'css/chat_interno.css' %}">
+  <link rel="stylesheet" href="{% static 'css/chat_interno.css' %}?v={{ site_version }}">
   {% block extra_css %}{% endblock %}
   {% block extra_head %}{% endblock %}
   <style>
@@ -49,7 +49,7 @@
         {% if user.is_authenticated %}
 
           {# Menu de módulos — agrupa todos os ambientes que o usuário pode ver #}
-          {% if pode_ver_operacao or pode_ver_painel_operacao or pode_ver_gestao or pode_ver_zapmsg or pode_ver_nibo or pode_ver_financeiro %}
+          {% if pode_ver_operacao or pode_ver_painel_operacao or pode_ver_gestao or pode_ver_zapmsg or pode_ver_nibo or pode_ver_financeiro or pode_ver_planilha %}
             <div class="dropdown">
               <button class="btn btn-light btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
                 ☰ Menu
@@ -72,6 +72,9 @@
                 {% endif %}
                 {% if pode_ver_financeiro %}
                   <li><a class="dropdown-item" href="{% url 'financeiro:financeiro' %}">💵 Financeiro</a></li>
+                {% endif %}
+                {% if pode_ver_planilha %}
+                  <li><a class="dropdown-item" href="{% url 'planilha:index' %}">🗂️ Planilha</a></li>
                 {% endif %}
               </ul>
             </div>
@@ -566,8 +569,11 @@
       <div class="d-flex flex-column" style="min-width:0;">
         <div id="chatConvHead" class="p-2 border-bottom chat-conv-head" style="background:#fff;">
           <div class="d-flex gap-2 align-items-center">
-            <input id="chatSearchMsg" class="form-control form-control-sm" placeholder="Pesquisar no histórico..." disabled>
-            <button id="chatSearchBtn" class="btn btn-sm btn-outline-primary" disabled>OK</button>
+            <input id="chatDateFilter" type="date" class="form-control form-control-sm" style="max-width:160px;" disabled title="Ver conversa a partir desta data">
+            <span class="text-secondary small">até</span>
+            <input id="chatDateFilterEnd" type="date" class="form-control form-control-sm" style="max-width:160px;" disabled title="Até esta data (deixe igual à primeira pra ver só um dia)">
+            <button id="chatDateFilterBtn" class="btn btn-sm btn-outline-primary" disabled>Ver</button>
+            <button id="chatDateTodayBtn" class="btn btn-sm btn-outline-secondary" type="button" title="Voltar para hoje" style="display:none;">Hoje</button>
 
             <button id="chatExportBtn"
                     class="btn btn-sm btn-outline-secondary"
@@ -611,6 +617,12 @@
         </div>
       </div>
     </div>
+  </div>
+
+  <!-- Lightbox: expandir imagem do chat -->
+  <div id="chatImgLightbox" class="chat-img-lightbox" style="display:none;">
+    <button type="button" id="chatImgLightboxClose" class="chat-img-lightbox-close" title="Fechar (Esc)">✕</button>
+    <img id="chatImgLightboxImg" src="" alt="Imagem ampliada">
   </div>
 
   <!-- Modal: Mensagem em massa -->

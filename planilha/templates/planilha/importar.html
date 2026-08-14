@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% block title %}Importar base — Planilha{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0">⬆️ Importar base</h4>
+  <a href="{% url 'planilha:index' %}" class="btn btn-outline-secondary btn-sm">← Voltar</a>
+</div>
+
+{% if messages %}
+  {% for m in messages %}
+    <div class="alert alert-{{ m.tags|default:'info' }}">{{ m }}</div>
+  {% endfor %}
+{% endif %}
+
+{% if not preview %}
+  {# ---------- Etapa 1: upload ---------- #}
+  <div class="card">
+    <div class="card-body">
+      <p class="text-muted">Envie o Excel no modelo de distribuição (aba <strong>'Operador'</strong>, 12 colunas).</p>
+      <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <div class="mb-3">
+          {{ form.arquivo }}
+          {% if form.arquivo.errors %}<div class="text-danger small">{{ form.arquivo.errors|join:", " }}</div>{% endif %}
+        </div>
+        <button type="submit" class="btn btn-primary">Analisar</button>
+      </form>
+    </div>
+  </div>
+
+{% else %}
+  {# ---------- Etapa 2: pré-visualização + alerta ---------- #}
+  <p class="text-muted">Arquivo: <strong>{{ arquivo_nome }}</strong> — confira antes de importar.</p>
+
+  {# Resumo por carteira #}
+  <div class="card mb-3">
+    <div class="card-header">Resumo — {{ analise.resumo.total_contratos }} contrato(s), {{ analise.resumo.carteiras|length }} carteira(s)</div>
+    <div class="table-responsive">
+      <table class="table table-sm mb-0">
+        <thead><tr><th>Carteira</th><th>Código</th><th class="text-end">Operadores</th><th class="text-end">Contratos</th></tr></thead>
+        <tbody>
+          {% for c in analise.resumo.carteiras %}
+            <tr><td>{{ c.nome }}</td><td>{{ c.cre_id }}</td><td class="text-end">{{ c.qtd_operadores }}</td><td class="text-end">{{ c.contratos }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  {# Substituições (base já existe) — escolher substituir tudo ou só adicionar os novos #}
+  {% if analise.substituicoes %}
+    <div class="alert alert-warning">
+      <strong>⚠️ Estas carteiras já têm base importada:</strong>
+      <ul class="mb-2 mt-2">
+        {% for s in analise.substituicoes %}
+          <li>
+            <strong>{{ s.nome }}</strong> ({{ s.cre_id }}) — {{ s.total_atual }} contrato(s) na base atual;
+            no arquivo enviado: <strong>{{ s.contratos_novos }} novo(s)</strong>, {{ s.contratos_ja_existentes }} já existente(s).
+          </li>
+        {% endfor %}
+      </ul>
+
+      <div class="form-check">
+        <input class="form-check-input" type="radio" name="modo_importacao" id="modo_substituir" value="substituir" checked>
+        <label class="form-check-label" for="modo_substituir">
+          <strong>Substituir tudo</strong> — apaga a base atual dessas carteiras (gera Excel de devolução) e insere a nova por completo.
+        </label>
+      </div>
+      <div class="form-check">
+        <input class="form-check-input" type="radio" name="modo_importacao" id="modo_adicionar" value="adicionar">
+        <label class="form-check-label" for="modo_adicionar">
+          <strong>Adicionar só os novos contratos</strong> — não mexe na base atual (prioridade/destaque/fila/acréscimos continuam), só insere os Nr Contrato que ainda não existem.
+        </label>
+      </div>
+    </div>
+  {% endif %}
+
+  {# Inconsistências #}
+  {% if analise.tem_inconsistencia %}
+    <div class="alert alert-danger">
+      <strong>🚫 Inconsistências encontradas:</strong>
+      {% if analise.linhas_invalidas %}<div>{{ analise.linhas_invalidas }} linha(s) sem Código ou Operador (serão ignoradas).</div>{% endif %}
+
+      {% if analise.contratos_duplicados %}
+        <div class="mt-2">{{ analise.contratos_duplicados|length }} <strong>Nr Contrato duplicado(s)</strong> (contrato existe só uma vez):</div>
+        <div class="table-responsive mt-1">
+          <table class="table table-sm table-borderless mb-0">
+            <thead><tr><th>Nr Contrato</th><th>Nome</th><th>Operador(es)</th><th class="text-end">Repetições</th></tr></thead>
+            <tbody>
+              {% for d in analise.contratos_duplicados %}
+                <tr><td>{{ d.nr_contrato }}</td><td>{{ d.nome }}</td><td>{{ d.operadores|join:" · " }}</td><td class="text-end">{{ d.qtd }}</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% endif %}
+
+      {% if analise.cpf_multi_operador %}
+        <div class="mt-2">{{ analise.cpf_multi_operador|length }} CPF(s) com <strong>mais de um operador</strong>:</div>
+        <div class="table-responsive mt-1">
+          <table class="table table-sm table-borderless mb-0">
+            <thead><tr><th>CPF/CNPJ</th><th>Nome</th><th>Operadores em conflito</th><th class="text-end">Contratos</th></tr></thead>
+            <tbody>
+              {% for i in analise.cpf_multi_operador %}
+                <tr><td>{{ i.cpf }}</td><td>{{ i.nome }}</td><td>{{ i.operadores|join:" · " }}</td><td class="text-end">{{ i.contratos }}</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% endif %}
+    </div>
+  {% else %}
+    <div class="alert alert-success">✅ Nenhuma inconsistência encontrada.</div>
+  {% endif %}
+
+  {# Confirmação #}
+  <form method="post" action="{% url 'planilha:confirmar_importacao' %}">
+    {% csrf_token %}
+    <input type="hidden" name="token" value="{{ token }}">
+    <input type="hidden" name="arquivo_nome" value="{{ arquivo_nome }}">
+
+    {% if analise.tem_inconsistencia %}
+      <div class="form-check mb-2">
+        <input class="form-check-input" type="checkbox" name="confirmar_erros" value="1" id="confirmar_erros" required>
+        <label class="form-check-label" for="confirmar_erros">
+          Estou ciente das inconsistências e quero importar mesmo assim.
+        </label>
+      </div>
+    {% endif %}
+
+    <button type="submit" class="btn btn-success">Importar</button>
+    <a href="{% url 'planilha:importar' %}" class="btn btn-outline-secondary">Cancelar</a>
+  </form>
+{% endif %}
+{% endblock %}

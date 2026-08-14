@@ -11,6 +11,7 @@ RelatorioRemessa (avisos/erros/processados), sem depender de request/messages.
 """
 
 import csv
+import os
 import unicodedata
 from datetime import datetime, timedelta, date
 from decimal import Decimal, ROUND_HALF_UP
@@ -346,6 +347,25 @@ CSV_COLUNAS = [
 ]
 
 
+def gravar_log_execucao(linhas, *, base_dir=None, prefixo="remessa"):
+    """
+    Grava um log de texto simples em var/nibo_remessa/ (mesmo padrao usado pelo
+    comando agendado). Serve para o envio manual (que roda em segundo plano,
+    sem pagina de resultado sincrona) deixar um rastro conferivel do que
+    aconteceu em cada execucao.
+    """
+    try:
+        base = Path(base_dir or getattr(settings, "BASE_DIR", Path(".")))
+        out_dir = base / "var" / "nibo_remessa"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        out_path = out_dir / f"{prefixo}_{ts}.log"
+        out_path.write_text("\n".join(linhas), encoding="utf-8")
+        return out_path
+    except Exception:
+        return None
+
+
 def gravar_csv_auditoria(enviados, *, base_dir=None, prefixo="remessa"):
     """
     Grava em var/nibo_remessa/ um CSV com UMA linha por lancamento enviado
@@ -376,6 +396,65 @@ def gravar_csv_auditoria(enviados, *, base_dir=None, prefixo="remessa"):
         return out_path
     except Exception:
         return None
+
+
+# ============================================================
+# LOCK DE ENVIO (arquivo em var/) — evita que duas execucoes rodem ao mesmo
+# tempo (job automatico das 9h x envio manual do painel, dois usuarios
+# clicando "Enviar" juntos, ou duas instancias/processos do HUB no ar ao
+# mesmo tempo apos um restart) e mandem os MESMOS lancamentos 2x/3x pro Nibo.
+#
+# Um threading.Lock nao resolveria: so protege threads dentro do MESMO
+# processo Python. O problema real observado em jul/2026 (job das 9h
+# disparando 2-3x, mandando o mesmo acordo repetido) foi entre PROCESSOS
+# diferentes rodando ao mesmo tempo — por isso o lock precisa ser em disco.
+# ============================================================
+LOCK_ENVIO_STALE_MINUTOS = 30  # acima disso, considera o lock "orfao" (processo morreu no meio do envio) e toma posse
+
+
+def _lock_envio_path():
+    base = Path(getattr(settings, "BASE_DIR", Path(".")))
+    return base / "var" / "nibo_envio.lock"
+
+
+def adquirir_lock_envio():
+    """
+    Cria o arquivo de lock de forma ATOMICA (O_CREAT|O_EXCL): se dois
+    processos tentarem no mesmo segundo, so um consegue — o outro recebe
+    FileExistsError e sabe que precisa esperar.
+
+    Retorna True se conseguiu o lock (pode enviar agora), False se ja existe
+    um envio em andamento.
+    """
+    p = _lock_envio_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        fd = os.open(str(p), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.write(fd, f"pid={os.getpid()} em={datetime.now().isoformat()}".encode())
+        os.close(fd)
+        return True
+    except FileExistsError:
+        try:
+            idade_min = (datetime.now().timestamp() - p.stat().st_mtime) / 60
+        except OSError:
+            return False
+        if idade_min <= LOCK_ENVIO_STALE_MINUTOS:
+            return False
+        # lock orfao: o processo que criou provavelmente morreu no meio do
+        # envio (kill/crash) e nunca liberou. Toma posse pra nao travar pra
+        # sempre o envio dos dias seguintes.
+        try:
+            p.unlink()
+        except OSError:
+            return False
+        return adquirir_lock_envio()
+
+
+def liberar_lock_envio():
+    try:
+        _lock_envio_path().unlink()
+    except OSError:
+        pass
 
 
 # ============================================================

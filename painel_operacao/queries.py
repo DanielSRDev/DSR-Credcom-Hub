@@ -691,3 +691,37 @@ ORDER BY
     pg.data_pagamento DESC,
     b.aco_numero DESC
 """
+
+# Valor real (não duplicado) da parcela paga, direto do repasse do Virtua
+# (tb_amortizacao). Usado só para corrigir acordos com mais de um
+# contrato/neg_id sob o mesmo aco_id (ex.: Vila Brasil), onde o Relatório
+# Geral acaba repetindo o pagamento/entrada cheios em cada linha porque o
+# join é feito só por aco_id. Usa sempre o pagamento MAIS RECENTE do aco_id
+# (mesmo critério de "data_pagamento" já usado no resto do relatório) — não
+# casa por data porque a "Data Pagto Parcela" exportada depende de outra
+# sincronização (painel principal) e pode estar desatualizada/nula logo após
+# um pagamento novo.
+SQL_AMORTIZACAO_POR_ACORDO = """
+;WITH pagamento_recente AS (
+    SELECT
+        pg.aco_id,
+        pg.pgo_id,
+        ROW_NUMBER() OVER (
+            PARTITION BY pg.aco_id
+            ORDER BY pg.pgo_data DESC, pg.pgo_id DESC
+        ) AS rn
+    FROM dbo.tb_pagamento pg
+    WHERE pg.aco_id IN ({placeholders})
+)
+SELECT
+    pr.aco_id,
+    SUM(
+        ISNULL(amr.amr_rep_princ, 0)
+        + ISNULL(amr.amr_rep_multa, 0)
+        + ISNULL(amr.amr_rep_juros, 0)
+    ) AS valor_parcela_amortizacao
+FROM pagamento_recente pr
+INNER JOIN dbo.tb_amortizacao amr ON amr.pgo_id = pr.pgo_id
+WHERE pr.rn = 1
+GROUP BY pr.aco_id
+"""

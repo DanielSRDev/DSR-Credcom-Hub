@@ -1,0 +1,441 @@
+{% extends "base.html" %}
+{% block title %}Planilha — Credcom Hub{% endblock %}
+
+{% block extra_css %}
+<style>
+  /* Destaque da linha: sobrepõe o fundo das células do Bootstrap */
+  tr.linha-destacada > td { background-color: var(--cor-linha) !important; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0">🗂️ Planilha <small class="text-muted">— {{ total }} contrato(s)</small></h4>
+  <div class="d-flex gap-2">
+    <form method="post" action="{% url 'planilha:sincronizar_status_agora' %}">
+      {% csrf_token %}
+      <button type="submit" class="btn btn-outline-primary btn-sm" title="Busca agora o último status de cobrança no Virtua, sem esperar a atualização automática">
+        🔄 Atualizar Status Atual
+      </button>
+    </form>
+    <a href="{% url 'planilha:busca_global' %}" class="btn btn-outline-dark btn-sm">🔎 Busca global</a>
+    {% if pode_importar_planilha %}
+      <a href="{% url 'planilha:importar' %}" class="btn btn-primary btn-sm">⬆️ Importar base</a>
+    {% endif %}
+  </div>
+</div>
+
+{% if messages %}{% for m in messages %}<div class="alert alert-{{ m.tags|default:'info' }} py-2">{{ m }}</div>{% endfor %}{% endif %}
+
+{# ---------- Filtros ---------- #}
+<form method="get" class="card card-body mb-3">
+  <div class="row g-2 align-items-end">
+    {% if muitas_bases %}
+      <div class="col-md-3">
+        <label class="form-label mb-0 small">Base / Carteira</label>
+        <select name="carteira" class="form-select form-select-sm">
+          <option value="">Todas</option>
+          {% for b in opcoes.bases %}
+            <option value="{{ b.cre_id }}" {% if filtros.carteira == b.cre_id|stringformat:'s' %}selected{% endif %}>{{ b.carteira_nome }} ({{ b.cre_id }})</option>
+          {% endfor %}
+        </select>
+      </div>
+    {% endif %}
+
+    <div class="col-md-3">
+      <label class="form-label mb-0 small">Nome ou CPF/CNPJ</label>
+      <input type="text" name="nome" value="{{ filtros.nome }}" class="form-control form-control-sm" placeholder="Cliente…">
+    </div>
+
+    <div class="col-md-2">
+      <label class="form-label mb-0 small">Empreendimento</label>
+      <input type="text" name="empreendimento" value="{{ filtros.empreendimento }}" class="form-control form-control-sm">
+    </div>
+
+    {% if opcoes.operadores|length > 1 %}
+      <div class="col-md-2">
+        <label class="form-label mb-0 small">Operador</label>
+        <select name="operador" class="form-select form-select-sm">
+          <option value="">Todos</option>
+          {% for op in opcoes.operadores %}
+            <option value="{{ op }}" {% if filtros.operador == op %}selected{% endif %}>{{ op }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    {% endif %}
+
+    <div class="col-md-2">
+      <label class="form-label mb-0 small d-block">Status</label>
+      <div class="dropdown">
+        <button type="button" class="btn btn-outline-secondary btn-sm dropdown-toggle w-100 text-start" data-bs-toggle="dropdown" data-bs-auto-close="outside">
+          {% if filtros_status %}{{ filtros_status|length }} selecionado(s){% else %}Todos{% endif %}
+        </button>
+        <div class="dropdown-menu p-2" style="max-height:280px; overflow-y:auto; min-width:220px;">
+          {% for s in opcoes.status %}
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="status" value="{{ s }}" id="st-{{ forloop.counter }}" {% if s in filtros_status %}checked{% endif %}>
+              <label class="form-check-label small" for="st-{{ forloop.counter }}">{{ s }}</label>
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-2">
+      <label class="form-label mb-0 small">Valor (min / max)</label>
+      <div class="d-flex gap-1">
+        <input type="number" step="0.01" name="valor_min" value="{{ filtros.valor_min }}" class="form-control form-control-sm" placeholder="min">
+        <input type="number" step="0.01" name="valor_max" value="{{ filtros.valor_max }}" class="form-control form-control-sm" placeholder="max">
+      </div>
+    </div>
+
+    <div class="col-md-2">
+      <label class="form-label mb-0 small">Atraso (min / max)</label>
+      <div class="d-flex gap-1">
+        <input type="number" name="atraso_min" value="{{ filtros.atraso_min }}" class="form-control form-control-sm" placeholder="min">
+        <input type="number" name="atraso_max" value="{{ filtros.atraso_max }}" class="form-control form-control-sm" placeholder="max">
+      </div>
+    </div>
+
+    <div class="col-md-2">
+      <label class="form-label mb-0 small d-block">Status Atual (Virtua)</label>
+      <div class="dropdown">
+        <button type="button" class="btn btn-outline-secondary btn-sm dropdown-toggle w-100 text-start" data-bs-toggle="dropdown" data-bs-auto-close="outside">
+          {% if filtros_status_atual %}{{ filtros_status_atual|length }} selecionado(s){% else %}Todos{% endif %}
+        </button>
+        <div class="dropdown-menu p-2" style="max-height:280px; overflow-y:auto; min-width:260px;">
+          {% for s in opcoes.status_atual %}
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="status_atual" value="{{ s }}" id="sa-{{ forloop.counter }}" {% if s in filtros_status_atual %}checked{% endif %}>
+              <label class="form-check-label small" for="sa-{{ forloop.counter }}">{{ s }}</label>
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-2">
+      <label class="form-label mb-0 small">Dias sem contato (min / max)</label>
+      <div class="d-flex gap-1">
+        <input type="number" name="dias_min" value="{{ filtros.dias_min }}" class="form-control form-control-sm" placeholder="min" title="Último contato há N dias ou mais">
+        <input type="number" name="dias_max" value="{{ filtros.dias_max }}" class="form-control form-control-sm" placeholder="max" title="Último contato há no máximo N dias">
+      </div>
+    </div>
+
+    <div class="col-md-2">
+      <label class="form-label mb-0 small">Cor de destaque</label>
+      <select name="cor" class="form-select form-select-sm">
+        <option value="">Todas</option>
+        <option value="__sem__" {% if filtros.cor == "__sem__" %}selected{% endif %}>Sem cor</option>
+        {% for cor, nome in cores %}
+          <option value="{{ cor }}" {% if filtros.cor == cor %}selected{% endif %}>{{ nome }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="col-md-2">
+      <label class="form-label mb-0 small d-block">Mostrar</label>
+      <div class="form-check form-check-inline">
+        <input class="form-check-input" type="checkbox" name="so_prioridade" value="1" id="f-prio" {% if filtros.so_prioridade %}checked{% endif %}>
+        <label class="form-check-label small" for="f-prio">⭐ Prioridade</label>
+      </div>
+      <div class="form-check form-check-inline">
+        <input class="form-check-input" type="checkbox" name="so_fila" value="1" id="f-fila" {% if filtros.so_fila %}checked{% endif %}>
+        <label class="form-check-label small" for="f-fila">🔢 Fila</label>
+      </div>
+      <div class="form-check form-check-inline">
+        <input class="form-check-input" type="checkbox" name="sem_contato" value="1" id="f-sem-contato" {% if filtros.sem_contato %}checked{% endif %}>
+        <label class="form-check-label small" for="f-sem-contato">🚫 Sem contato</label>
+      </div>
+    </div>
+
+    <div class="col-md-2">
+      <button type="submit" class="btn btn-primary btn-sm">Filtrar</button>
+      <a href="{% url 'planilha:index' %}" class="btn btn-outline-secondary btn-sm">Limpar</a>
+    </div>
+  </div>
+</form>
+
+{# ---------- Ações em lote ---------- #}
+<div class="d-flex gap-2 mb-2 align-items-center flex-wrap">
+  <button type="button" id="btn-exportar" class="btn btn-success btn-sm">⬇️ Exportar selecionados</button>
+  <a href="{% url 'planilha:exportar_filtrados' %}{% if querystring %}?{{ querystring }}{% endif %}"
+     class="btn btn-outline-success btn-sm" title="Exporta todos os {{ total }} contrato(s) do filtro atual, não só os desta página">
+    ⬇️ Exportar tudo filtrado ({{ total }})
+  </a>
+
+  <div class="dropdown d-inline">
+    <button type="button" class="btn btn-outline-primary btn-sm dropdown-toggle" data-bs-toggle="dropdown">🎨 Pintar selecionados</button>
+    <div class="dropdown-menu p-2">
+      <div class="d-flex gap-1 align-items-center">
+        {% for cor, nome in cores %}
+          <button type="button" class="btn btn-sm p-2 border rounded btn-paint" data-cor="{{ cor }}" style="background:{{ cor }}" title="{{ nome }}"></button>
+        {% endfor %}
+        <button type="button" class="btn btn-sm btn-outline-secondary btn-paint" data-cor="" title="Limpar destaque">✕</button>
+      </div>
+    </div>
+  </div>
+
+  {% if pode_priorizar %}
+    <button type="button" id="btn-marcar-lote" class="btn btn-warning btn-sm">⭐ Marcar prioridade</button>
+    <button type="button" id="btn-desmarcar-tudo" class="btn btn-outline-secondary btn-sm">Desmarcar prioridades</button>
+    <span class="vr"></span>
+    <button type="button" id="btn-add-fila" class="btn btn-info btn-sm">➕ Adicionar à fila</button>
+    <button type="button" id="btn-limpar-fila" class="btn btn-outline-danger btn-sm">🧹 Limpar fila</button>
+  {% endif %}
+
+  <span class="text-muted small" id="lote-info"></span>
+</div>
+
+<form method="post" action="{% url 'planilha:exportar_selecionados' %}" id="form-export" class="d-none">
+  {% csrf_token %}<div id="export-ids"></div>
+</form>
+<form method="post" action="{% url 'planilha:destaque_lote' %}" id="form-destaque" class="d-none">
+  {% csrf_token %}<input type="hidden" name="cor" id="destaque-cor"><div id="destaque-ids"></div>
+</form>
+{% if pode_priorizar %}
+<form method="post" action="{% url 'planilha:prioridade_lote' %}" id="form-lote" class="d-none">
+  {% csrf_token %}<input type="hidden" name="acao" id="lote-acao"><div id="lote-ids"></div>
+</form>
+<form method="post" action="{% url 'planilha:fila_lote' %}" id="form-fila" class="d-none">
+  {% csrf_token %}<input type="hidden" name="acao" id="fila-acao"><div id="fila-ids"></div>
+</form>
+{% endif %}
+
+{# ---------- Tabela ---------- #}
+<div class="card">
+  <div class="table-responsive">
+    <table class="table table-sm table-hover mb-0 align-middle">
+      <thead class="table-light">
+        <tr>
+          <th style="width:1%"><input type="checkbox" id="chk-all" title="Selecionar todos"></th>
+          {% for campo, rotulo in colunas_ordenaveis %}
+            <th{% if campo == "atraso_real" or campo == "vlr_total" %} class="text-end"{% endif %}>
+              <a href="?{{ querystring_sem_sort }}&sort={{ campo }}&dir={% if sort_atual == campo and dir_atual == "asc" %}desc{% else %}asc{% endif %}" class="text-decoration-none text-dark">
+                {{ rotulo }}{% if sort_atual == campo %} {% if dir_atual == "asc" %}▲{% else %}▼{% endif %}{% endif %}
+              </a>
+            </th>
+          {% endfor %}
+          <th>Status Atual (Virtua)</th>
+          <th class="text-end">Ações</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in page %}
+          <tr {% if c.destaque_cor %}class="linha-destacada" style="--cor-linha: {{ c.destaque_cor }}66;"{% endif %}>
+            <td><input type="checkbox" class="chk-lote" value="{{ c.id }}"></td>
+            <td>{% if c.fila_ordem %}<span class="badge bg-info text-dark" title="Posição na fila">🔢 {{ c.fila_ordem }}</span> {% endif %}{% if c.prioridade %}<span title="Prioridade">⭐</span> {% endif %}{{ c.nr_contrato }}</td>
+            <td><a href="#" class="abrir-card text-decoration-none fw-semibold" data-id="{{ c.id }}">{{ c.nome_cliente }}</a></td>
+            <td>{{ c.cpf_cnpj }}</td>
+            <td>{{ c.empreendimento }}</td>
+            <td>{{ c.operador_nome }}</td>
+            <td class="text-end">{{ c.atraso_real|default_if_none:"—" }}</td>
+            <td class="text-end">R$ {{ c.vlr_total }}</td>
+            <td>{{ c.status_antigo }}</td>
+            <td>
+              {% if c.status_atual %}
+                {{ c.status_atual }}
+                <div class="small text-muted">há {{ c.dias_status_atual }} dia{{ c.dias_status_atual|pluralize }}</div>
+              {% else %}
+                <span class="text-muted">—</span>
+              {% endif %}
+            </td>
+            <td class="text-end text-nowrap">
+              {% if pode_priorizar %}
+                <form method="post" action="{% url 'planilha:toggle_prioridade' c.id %}" class="d-inline">
+                  {% csrf_token %}
+                  <button type="submit" class="btn btn-sm btn-link p-0 text-decoration-none" title="Prioridade">{% if c.prioridade %}⭐{% else %}☆{% endif %}</button>
+                </form>
+              {% endif %}
+
+              <div class="dropdown d-inline">
+                <button type="button" class="btn btn-sm btn-link p-0 text-decoration-none" data-bs-toggle="dropdown" title="Destaque">🎨</button>
+                <div class="dropdown-menu p-2">
+                  <div class="d-flex gap-1 align-items-center">
+                    {% for cor, nome in cores %}
+                      <form method="post" action="{% url 'planilha:definir_destaque' c.id %}">
+                        {% csrf_token %}<input type="hidden" name="cor" value="{{ cor }}">
+                        <button type="submit" class="btn btn-sm p-2 border rounded" style="background:{{ cor }}" title="{{ nome }}"></button>
+                      </form>
+                    {% endfor %}
+                    <form method="post" action="{% url 'planilha:definir_destaque' c.id %}">
+                      {% csrf_token %}<input type="hidden" name="cor" value="">
+                      <button type="submit" class="btn btn-sm btn-outline-secondary" title="Limpar destaque">✕</button>
+                    </form>
+                  </div>
+                </div>
+              </div>
+
+              <a href="{% url 'planilha:contrato_detalhe' c.id %}" class="btn btn-sm btn-link p-0 text-decoration-none" title="Detalhes / acréscimos">📝{% if c.n_acrescimos %} <span class="badge bg-secondary">{{ c.n_acrescimos }}</span>{% endif %}</a>
+            </td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="11" class="text-center text-muted py-4">Nenhum contrato para exibir com a sua visão/filtros.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{# ---------- Paginação ---------- #}
+{% if page.paginator.num_pages > 1 %}
+  <nav class="mt-3">
+    <ul class="pagination pagination-sm justify-content-center">
+      {% if page.has_previous %}
+        <li class="page-item"><a class="page-link" href="?{% if querystring %}{{ querystring }}&{% endif %}page={{ page.previous_page_number }}">‹ Anterior</a></li>
+      {% endif %}
+      <li class="page-item disabled"><span class="page-link">Página {{ page.number }} de {{ page.paginator.num_pages }}</span></li>
+      {% if page.has_next %}
+        <li class="page-item"><a class="page-link" href="?{% if querystring %}{{ querystring }}&{% endif %}page={{ page.next_page_number }}">Próxima ›</a></li>
+      {% endif %}
+    </ul>
+  </nav>
+{% endif %}
+
+{# ---------- Modal de atendimento (card do contrato) ---------- #}
+<div class="modal fade" id="cardModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">🗂️ Atendimento</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+      </div>
+      <div class="modal-body" id="cardModalBody">
+        <div class="text-center text-muted py-4">Carregando…</div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+  var all = document.getElementById('chk-all');
+  var boxes = function () { return Array.prototype.slice.call(document.querySelectorAll('.chk-lote')); };
+  var info = document.getElementById('lote-info');
+
+  function atualizaInfo() {
+    if (!info) return;
+    var n = boxes().filter(function (c) { return c.checked; }).length;
+    info.textContent = n ? (n + ' selecionado(s)') : '';
+  }
+  if (all) all.addEventListener('change', function () {
+    boxes().forEach(function (c) { c.checked = all.checked; });
+    atualizaInfo();
+  });
+  boxes().forEach(function (c) { c.addEventListener('change', atualizaInfo); });
+
+  function enviar(acao, ids) {
+    document.getElementById('lote-acao').value = acao;
+    var box = document.getElementById('lote-ids');
+    box.innerHTML = '';
+    ids.forEach(function (id) {
+      var i = document.createElement('input');
+      i.type = 'hidden'; i.name = 'ids'; i.value = id;
+      box.appendChild(i);
+    });
+    document.getElementById('form-lote').submit();
+  }
+
+  var bm = document.getElementById('btn-marcar-lote');
+  if (bm) bm.addEventListener('click', function () {
+    var ids = boxes().filter(function (c) { return c.checked; }).map(function (c) { return c.value; });
+    if (!ids.length) { alert('Selecione ao menos um contrato.'); return; }
+    enviar('marcar', ids);
+  });
+
+  var bd = document.getElementById('btn-desmarcar-tudo');
+  if (bd) bd.addEventListener('click', function () {
+    if (!confirm('Remover a prioridade de TODOS os contratos da sua base?')) return;
+    enviar('desmarcar_tudo', []);
+  });
+
+  function selecionados() {
+    return boxes().filter(function (c) { return c.checked; }).map(function (c) { return c.value; });
+  }
+  function preencheIds(containerId, ids) {
+    var box = document.getElementById(containerId);
+    box.innerHTML = '';
+    ids.forEach(function (id) {
+      var i = document.createElement('input');
+      i.type = 'hidden'; i.name = 'ids'; i.value = id;
+      box.appendChild(i);
+    });
+  }
+
+  var be = document.getElementById('btn-exportar');
+  if (be) be.addEventListener('click', function () {
+    var ids = selecionados();
+    if (!ids.length) { alert('Selecione ao menos um contrato para exportar.'); return; }
+    preencheIds('export-ids', ids);
+    document.getElementById('form-export').submit();
+  });
+
+  // pintar em massa
+  document.querySelectorAll('.btn-paint').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var ids = selecionados();
+      if (!ids.length) { alert('Selecione ao menos um contrato para pintar.'); return; }
+      document.getElementById('destaque-cor').value = b.getAttribute('data-cor');
+      preencheIds('destaque-ids', ids);
+      document.getElementById('form-destaque').submit();
+    });
+  });
+
+  // fila
+  var baf = document.getElementById('btn-add-fila');
+  if (baf) baf.addEventListener('click', function () {
+    var ids = selecionados();
+    if (!ids.length) { alert('Selecione os clientes para adicionar à fila.'); return; }
+    document.getElementById('fila-acao').value = 'adicionar';
+    preencheIds('fila-ids', ids);
+    document.getElementById('form-fila').submit();
+  });
+  var blf = document.getElementById('btn-limpar-fila');
+  if (blf) blf.addEventListener('click', function () {
+    if (!confirm('Limpar a fila inteira (remover todos da fila)?')) return;
+    document.getElementById('fila-acao').value = 'limpar';
+    preencheIds('fila-ids', []);
+    document.getElementById('form-fila').submit();
+  });
+
+  // ---------- Modal de atendimento (abre o card ao clicar no nome) ----------
+  var modalEl = document.getElementById('cardModal');
+  var cardBody = document.getElementById('cardModalBody');
+  var cardModal = (modalEl && window.bootstrap) ? new bootstrap.Modal(modalEl) : null;
+
+  function carregarCard(id) {
+    if (!cardModal) return;
+    cardBody.innerHTML = '<div class="text-center text-muted py-4">Carregando…</div>';
+    cardModal.show();
+    fetch('/planilha/contrato/' + id + '/card/', { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+      .then(function (r) { return r.text(); })
+      .then(function (html) { cardBody.innerHTML = html; })
+      .catch(function () { cardBody.innerHTML = '<div class="text-danger py-3">Erro ao carregar.</div>'; });
+  }
+
+  document.querySelectorAll('.abrir-card').forEach(function (a) {
+    a.addEventListener('click', function (e) {
+      e.preventDefault();
+      carregarCard(a.getAttribute('data-id'));
+    });
+  });
+
+  // Formulários dentro do card (prioridade/destaque/acréscimo) enviam via AJAX
+  // e substituem o conteúdo do card, mantendo a janela aberta.
+  if (cardBody) cardBody.addEventListener('submit', function (e) {
+    var form = e.target.closest('form');
+    if (!form) return;
+    e.preventDefault();
+    fetch(form.action, {
+      method: 'POST',
+      body: new FormData(form),
+      headers: { 'X-Requested-With': 'XMLHttpRequest' },
+    })
+      .then(function (r) { return r.text(); })
+      .then(function (html) { cardBody.innerHTML = html; });
+  });
+})();
+</script>
+{% endblock %}

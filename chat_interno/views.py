@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import csv
+from datetime import datetime
 from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse, HttpResponse
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST
 from django.contrib.auth import get_user_model
 
@@ -17,6 +19,7 @@ from .services import (
     unread_by_contact,
     unread_count,
     list_messages_between,
+    list_messages_for_range,
     send_text,
     mark_read_conversation,
     effective_status,
@@ -185,13 +188,47 @@ def history(request, user_id: int):
     after_id = _parse_id("after_id")
     before_id = _parse_id("before_id")
 
-    if after_id:
+    if after_id is not None:
         msgs, conv, has_more = list_messages_between(actor, other, after_id=after_id)
-    else:
-        limit_raw = (request.GET.get("limit") or "").strip()
-        limit = int(limit_raw) if limit_raw.isdigit() else HISTORY_PAGE_SIZE
-        msgs, conv, has_more = list_messages_between(actor, other, limit=limit, before_id=before_id)
+        items = [_serialize_message(m, actor) for m in msgs]
+        return JsonResponse({"items": items, "has_more": has_more})
 
+    date_raw = (request.GET.get("date") or "").strip()
+    date_end_raw = (request.GET.get("date_end") or "").strip()
+
+    # Sem before_id (ou com data explícita): carrega o dia/período pedido
+    # (padrão hoje), em vez de um lote fixo de mensagens recentes — evita
+    # puxar histórico inteiro toda vez que o chat é aberto.
+    if date_raw or before_id is None:
+        if date_raw:
+            try:
+                start_day = datetime.strptime(date_raw, "%Y-%m-%d").date()
+            except ValueError:
+                return JsonResponse({"error": "Data inválida."}, status=400)
+        else:
+            start_day = timezone.localdate()
+
+        end_day = start_day
+        if date_end_raw:
+            try:
+                end_day = datetime.strptime(date_end_raw, "%Y-%m-%d").date()
+            except ValueError:
+                return JsonResponse({"error": "Data final inválida."}, status=400)
+
+        msgs, conv, baseline_id = list_messages_for_range(actor, other, start_day, end_day)
+        items = [_serialize_message(m, actor) for m in msgs]
+        is_today = start_day == end_day == timezone.localdate()
+        return JsonResponse({
+            "items": items,
+            "date": start_day.isoformat(),
+            "date_end": end_day.isoformat(),
+            "is_today": is_today,
+            "baseline_id": baseline_id,
+        })
+
+    limit_raw = (request.GET.get("limit") or "").strip()
+    limit = int(limit_raw) if limit_raw.isdigit() else HISTORY_PAGE_SIZE
+    msgs, conv, has_more = list_messages_between(actor, other, limit=limit, before_id=before_id)
     items = [_serialize_message(m, actor) for m in msgs]
     return JsonResponse({"items": items, "has_more": has_more})
 

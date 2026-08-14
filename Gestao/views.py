@@ -155,7 +155,10 @@ def _build_base_filtrado(request):
             Q(codigo__iexact=f_busca) | Q(titulo__icontains=f_busca)
         )
 
-    if f_user:
+    if f_user == "todos":
+        # Gestor pediu "Todos": nenhum filtro de responsável, vê o quadro inteiro.
+        pass
+    elif f_user:
         try:
             uid = int(f_user)
             base = base.filter(
@@ -213,18 +216,22 @@ def _contexto_quadro(request):
     # ------------------------------------------------------------------
     # Regra de filtro de responsável (vale para TODAS as colunas):
     #   - Usuário sem permissão de gestor fica travado em si mesmo.
-    #   - COM f_user (gestor filtrando alguém): mostra todos os cards
-    #     em que esse usuário tem QUALQUER relação (atribuído OU
-    #     executor OU criador). Filtro estrito — não mistura cards
+    #   - f_user == "todos" (gestor escolheu "Todos" explicitamente):
+    #     nenhum filtro de responsável — vê TODO o quadro, de todo mundo.
+    #   - COM f_user (gestor filtrando alguém específico): mostra todos
+    #     os cards em que esse usuário tem QUALQUER relação (atribuído
+    #     OU executor OU criador). Filtro estrito — não mistura cards
     #     do próprio logado.
-    #   - SEM f_user: mostra tudo que tem relação com o LOGADO
-    #     (atribuído OU executor OU criador).
+    #   - SEM f_user (nada selecionado ainda): mostra só o que tem
+    #     relação com o LOGADO (atribuído OU executor OU criador).
     # ------------------------------------------------------------------
     if not pode_editar(request.user):
         # Não-gestor não pode filtrar outro responsável
         f_user = str(request.user.id)
 
-    if f_user:
+    if f_user == "todos":
+        pass
+    elif f_user:
         try:
             uid = int(f_user)
             base = base.filter(

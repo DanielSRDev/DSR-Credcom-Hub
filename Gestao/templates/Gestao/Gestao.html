@@ -89,7 +89,8 @@
       <div class="f-group">
         <label>Responsável</label>
         <select name="user" class="f-resp">
-          <option value="">Todos</option>
+          <option value="" {% if not f_user %}selected{% endif %}>— (só meus) —</option>
+          <option value="todos" {% if f_user == "todos" %}selected{% endif %}>Todos</option>
           {% for u in usuarios %}
             <option value="{{ u.id }}" {% if f_user|add:"" == u.id|add:"" %}selected{% endif %}>{{ u.username }}</option>
           {% endfor %}

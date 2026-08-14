@@ -2,10 +2,12 @@ from datetime import date
 from decimal import Decimal
 from io import BytesIO
 import re
+import threading
 
 import pandas as pd
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.db import connections
 from django.db.models import Sum
 from django.http import HttpResponse, HttpResponseForbidden
 from django.shortcuts import redirect, render
@@ -20,7 +22,13 @@ from .models import (
     PainelOperacaoRelatorioGeral,
     SupervisorPainel,
 )
-from .services import eh_status_pago, sincronizar_painel_operacao, sincronizar_relatorio_geral
+from .queries import SQL_AMORTIZACAO_POR_ACORDO
+from .services import (
+    eh_status_pago,
+    executar_query,
+    sincronizar_painel_operacao,
+    sincronizar_relatorio_geral,
+)
 from .services_acompanhamento import linked_credores_ids, montar_acompanhamento_geral
 
 
@@ -71,6 +79,8 @@ CONTRATANTE_MAP = {
     "HB":    "HB CONSTRUTORA",
     "LOG":    "Colégio Logosófico",
     "AM3":    "AM3 Imobiliária",
+    "Viver Bem":     "ViverBem",
+    "ELSH":     "El Shadai",
 
 }
 
@@ -604,50 +614,23 @@ def atualizar_relatorio_geral_view(request):
         hoje = date.today()
         data_ini = date.fromisoformat(data_ini_str) if data_ini_str else date(hoje.year, hoje.month, 1)
         data_fim = date.fromisoformat(data_fim_str) if data_fim_str else hoje
+    except ValueError:
+        hoje = date.today()
+        data_ini = date(hoje.year, hoje.month, 1)
+        data_fim = hoje
 
-        resultado = sincronizar_relatorio_geral(
-            data_ini=data_ini,
-            data_fim=data_fim,
-        )
-
+    # Segundo plano (evita 502 por timeout do proxy).
+    if not _sync_lock.acquire(blocking=False):
+        messages.info(request, "⏳ Já existe uma atualização em andamento. Aguarde e recarregue.")
+    else:
+        threading.Thread(
+            target=_rodar_sync_bg, args=(data_ini, data_fim), kwargs={"incluir_painel": False}, daemon=True,
+        ).start()
         messages.success(
             request,
-            f"{resultado.get('mensagem', 'Relatório geral atualizado.')} | "
-            f"Período usado: {data_ini.strftime('%d/%m/%Y')} até {data_fim.strftime('%d/%m/%Y')}"
+            f"🔄 Relatório sendo atualizado em segundo plano (período {data_ini:%d/%m/%Y} a {data_fim:%d/%m/%Y}). "
+            f"Aguarde 1–2 minutos e recarregue a página.",
         )
-
-        # Verifica carteiras nos dados sincronizados que não estão cadastradas no sistema.
-        registered_cre_ids = set(
-            CarteiraSupervisor.objects
-            .filter(ativo=True)
-            .exclude(cre_id__isnull=True)
-            .values_list("cre_id", flat=True)
-        )
-        nao_cadastradas = (
-            PainelOperacaoRelatorioGeral.objects
-            .filter(data_referencia__gte=data_ini, data_referencia__lte=data_fim)
-            .exclude(cre_id__isnull=True)
-            .exclude(cre_id__in=registered_cre_ids)
-            .values("cre_id", "credor")
-            .distinct()
-            .order_by("credor")
-        )
-        if nao_cadastradas.exists():
-            credores_texto = "; ".join(
-                f"{item['credor']} (ID: {item['cre_id']})"
-                for item in nao_cadastradas[:10]
-            )
-            total = nao_cadastradas.count()
-            sufixo = f" e mais {total - 10} outra(s)" if total > 10 else ""
-            messages.warning(
-                request,
-                f"Atenção: {total} carteira(s) nos dados sincronizados não estão cadastradas "
-                f"e foram excluídas do painel: {credores_texto}{sufixo}. "
-                f"Cadastre-as em Carteiras por Supervisor para incluí-las nas métricas.",
-            )
-
-    except Exception as e:
-        messages.error(request, f"Erro ao atualizar relatório geral: {e}")
 
     url = reverse("painel_operacao:painel")
 
@@ -676,17 +659,20 @@ def exportar_relatorio_geral_view(request):
         "-data_emissao",
     )
 
+    # Periodo filtra por DATA DE EMISSAO, nao data_referencia/data_acordo.
+    # Mesma regra do Acompanhamento Geral (services_acompanhamento.py) —
+    # pedido do usuario 2026-08-07.
     if data_ini_str:
         try:
             data_ini = date.fromisoformat(data_ini_str)
-            qs = qs.filter(data_referencia__gte=data_ini)
+            qs = qs.filter(data_emissao__date__gte=data_ini)
         except ValueError:
             pass
 
     if data_fim_str:
         try:
             data_fim = date.fromisoformat(data_fim_str)
-            qs = qs.filter(data_referencia__lte=data_fim)
+            qs = qs.filter(data_emissao__date__lte=data_fim)
         except ValueError:
             pass
 
@@ -737,6 +723,8 @@ def exportar_relatorio_geral_view(request):
             "valor_avencer",
             "valor_quebra",
             "observacao_contrato",
+            "valor_recuperado_parcelamento",
+            "valor_recuperado_refinanciamento",
         )
     )
 
@@ -833,9 +821,47 @@ def exportar_relatorio_geral_view(request):
             - despesas_col[mask_parc_refin]
         )
 
+        # Regra 4 (Vila Brasil, sigla "VILA"): o Stage representa o mesmo
+        # contrato em 2+ linhas sob o mesmo aco_id (Tipo do Contrato
+        # diferente — ex.: "Prestação Habitacional" + "Vila Brasil"), e as
+        # regras acima usam campos de nível-acordo (pagamento/entrada) que
+        # ficam duplicados em cada linha, inflando o Valor Parcela. Busca o
+        # valor real (não duplicado) da parcela em tb_amortizacao e divide
+        # igualmente entre as linhas do mesmo aco_id.
+        aco_id_col = df.get("aco_id")
+        if aco_id_col is not None:
+            grupo_size = df.groupby("aco_id")["aco_id"].transform("size")
+            mask_vila_multi = (df.get("credor") == "VILA") & (grupo_size > 1)
+
+            if mask_vila_multi.any():
+                aco_ids_vila = sorted(
+                    {int(v) for v in aco_id_col[mask_vila_multi].dropna().unique()}
+                )
+                placeholders = ", ".join(["%s"] * len(aco_ids_vila))
+                amortizacao_raw = executar_query(
+                    SQL_AMORTIZACAO_POR_ACORDO.format(placeholders=placeholders),
+                    aco_ids_vila,
+                )
+                amortizacao_df = pd.DataFrame(amortizacao_raw)
+
+                if not amortizacao_df.empty:
+                    amortizacao_df["valor_parcela_amortizacao"] = pd.to_numeric(
+                        amortizacao_df["valor_parcela_amortizacao"], errors="coerce"
+                    ).fillna(0)
+
+                    df = df.merge(amortizacao_df, on="aco_id", how="left")
+
+                    tem_amortizacao = mask_vila_multi & df["valor_parcela_amortizacao"].notna()
+                    df.loc[tem_amortizacao, "valor_parcela_exportacao"] = (
+                        df.loc[tem_amortizacao, "valor_parcela_amortizacao"] / grupo_size[tem_amortizacao]
+                    )
+                    df.drop(columns=["valor_parcela_amortizacao"], errors="ignore", inplace=True)
+
         df["observacao_contrato"] = df.get("observacao_contrato", "")
-        df["valor_recuperado_parcelamento"] = ""
-        df["valor_recuperado_refinanciamento"] = ""
+        # Só populado hoje pra acordos de origem Virtua (Viver Bem); Stage
+        # continua saindo em branco, sem equivalente calculado ainda.
+        for col in ("valor_recuperado_parcelamento", "valor_recuperado_refinanciamento"):
+            df[col] = pd.to_numeric(df.get(col), errors="coerce")
 
         df = df.rename(columns={
             "cre_id": "Cód. Contratante",
@@ -957,34 +983,50 @@ def config_view(request):
     return render(request, "painel_operacao/config.html", {})
 
 
+# Trava simples para não rodar duas sincronizações ao mesmo tempo.
+_sync_lock = threading.Lock()
+
+
+def _rodar_sync_bg(data_ini, data_fim, incluir_painel=True):
+    """
+    Roda a sincronização em SEGUNDO PLANO — evita o timeout do proxy (502),
+    já que o sync pode levar mais que o limite da requisição no servidor.
+    """
+    try:
+        if incluir_painel:
+            sincronizar_painel_operacao(data_ini=data_ini, data_fim=data_fim)
+        sincronizar_relatorio_geral(data_ini=data_ini, data_fim=data_fim)
+    except Exception:
+        pass
+    finally:
+        connections.close_all()   # fecha as conexões abertas nesta thread
+        _sync_lock.release()
+
+
 @login_required
 def atualizar_view(request):
     if request.method != "POST":
         return redirect("painel_operacao:painel")
 
-    try:
-        # Lê período definido no admin (Configuração do Painel)
-        config = PainelConfiguracao.objects.filter(ativo=True).first()
-        hoje = date.today()
-        data_ini = (config.sync_data_ini if config and config.sync_data_ini else None) or date(hoje.year, hoje.month, 1)
-        data_fim = (config.sync_data_fim if config and config.sync_data_fim else None) or hoje
+    # Período definido no admin (Configuração do Painel)
+    config = PainelConfiguracao.objects.filter(ativo=True).first()
+    hoje = date.today()
+    data_ini = (config.sync_data_ini if config and config.sync_data_ini else None) or date(hoje.year, hoje.month, 1)
+    data_fim = (config.sync_data_fim if config and config.sync_data_fim else None) or hoje
 
-        # 1. Painel (emissão)
-        resultado_painel = sincronizar_painel_operacao(data_ini=data_ini, data_fim=data_fim)
+    if not _sync_lock.acquire(blocking=False):
+        messages.info(request, "⏳ Já existe uma atualização em andamento. Aguarde e recarregue em instantes.")
+        return redirect("painel_operacao:painel")
 
-        # 2. Relatório Geral (pagamentos + cruzamento)
-        resultado_relatorio = sincronizar_relatorio_geral(data_ini=data_ini, data_fim=data_fim)
+    threading.Thread(
+        target=_rodar_sync_bg, args=(data_ini, data_fim), kwargs={"incluir_painel": True}, daemon=True,
+    ).start()
 
-        messages.success(
-            request,
-            f"✅ Painel: {resultado_painel.get('mensagem', 'OK')} | "
-            f"📊 Relatório: {resultado_relatorio.get('mensagem', 'OK')} | "
-            f"Período: {data_ini.strftime('%d/%m/%Y')} até {data_fim.strftime('%d/%m/%Y')}"
-        )
-
-    except Exception as e:
-        messages.error(request, f"Erro ao atualizar dados: {e}")
-
+    messages.success(
+        request,
+        f"🔄 Atualização iniciada em segundo plano (período {data_ini:%d/%m/%Y} a {data_fim:%d/%m/%Y}). "
+        f"Aguarde 1–2 minutos e recarregue a página para ver os dados.",
+    )
     return redirect("painel_operacao:painel")
 
 def aplicar_filtros_acompanhamento(request):

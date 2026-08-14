@@ -22,11 +22,18 @@ from .queries import (
     SQL_RELATORIO_GERAL_HUB_BASE,
     SQL_RELATORIO_GERAL_PAGOS_EXTRA,
 )
+from .services_acompanhamento import linked_credores_ids
 
 
 def decimal_or_zero(value):
     if value is None or value == "":
         return Decimal("0.00")
+    return Decimal(str(value))
+
+
+def decimal_or_none(value):
+    if value is None or value == "":
+        return None
     return Decimal(str(value))
 
 
@@ -779,6 +786,8 @@ def criar_registros_relatorio_geral(registros_hub, registros_pagos_extra, data_b
                 taxa_liquida=taxa_liquida,
                 valor_entrada=decimal_or_zero(item.get("valor_entrada")),
                 valor_pagamento_periodo=valor_pagamento_periodo,
+                valor_recuperado_parcelamento=decimal_or_none(item.get("valor_recuperado_parcelamento")),
+                valor_recuperado_refinanciamento=decimal_or_none(item.get("valor_recuperado_refinanciamento")),
 
                 qtd_parcelas_acordo=item.get("qtd_parcelas_acordo") or 0,
                 status_acordo=item.get("status_acordo") or "",
@@ -844,6 +853,17 @@ def sincronizar_painel_operacao(data_ini=None, data_fim=None):
             for item in registros_pagamento_raw
             if normalizar_bigint(item.get("aco_id")) is not None
         }
+
+        # Acordos das carteiras migradas pro Virtua (ver CARTEIRAS_VIRTUA em
+        # virtua_emissao.py). Falha de conexão com o Virtua NÃO pode
+        # derrubar o sync do Stage.
+        try:
+            from .virtua_emissao import buscar_registros_virtua_para_painel
+            registros_virtua_raw, aco_ids_pagos_virtua = buscar_registros_virtua_para_painel(data_ini, data_fim)
+            registros_acordo_raw = registros_acordo_raw + registros_virtua_raw
+            aco_ids_pagos = aco_ids_pagos | aco_ids_pagos_virtua
+        except Exception as e:
+            print("Erro ao buscar acordos das carteiras Virtua (painel):", e)
 
         pagamentos_locais = criar_pagamentos_locais(registros_pagamento_raw)
         registros_locais = criar_registros_locais(registros_acordo_raw, aco_ids_pagos)
@@ -912,10 +932,24 @@ def sincronizar_relatorio_geral(data_ini=None, data_fim=None):
         # filtramos por Data Acordo no período.
         data_ini_larga = data_ini - timedelta(days=60)
         data_limite_vencimento = ultimo_dia_mes(data_fim)
+
+        # Carteiras não cadastradas em CarteiraSupervisor (ativa) não fazem parte
+        # do painel. Filtrar AQUI, antes da consolidação, é essencial: acordos de
+        # credores fora do padrão nunca aparecem no relatório final, mas se entrarem
+        # na consolidação (agrupamento por Nr Contrato) podem derrubar uma quebra
+        # legítima de outro credor que, por coincidência, reusa o mesmo número de
+        # contrato para o mesmo cliente (ex.: acordo 31171/EBM sumiu por causa de
+        # acordos do credor BR137, não cadastrado, com o mesmo Nr Contrato 54450).
+        credores_permitidos = set(linked_credores_ids())
+
         registros_acordo_raw = executar_query(
             SQL_PAINEL_OPERACAO,
             [data_ini_larga, data_fim, data_limite_vencimento],
         )
+        registros_acordo_raw = [
+            item for item in registros_acordo_raw
+            if normalizar_bigint(item.get("cre_id")) in credores_permitidos
+        ]
         registros_pagamento_raw = executar_query(
             SQL_PAGAMENTOS_ACORDO, [data_ini_larga, data_fim]
         )
@@ -935,8 +969,24 @@ def sincronizar_relatorio_geral(data_ini=None, data_fim=None):
         registros = criar_registros_relatorio_a_partir_painel(base_hub_consolidada)
 
         pagamentos_extra_raw = executar_query(SQL_RELATORIO_GERAL_PAGOS_EXTRA, [data_ini, data_fim])
+        pagamentos_extra_raw = [
+            item for item in pagamentos_extra_raw
+            if normalizar_bigint(item.get("cre_id")) in credores_permitidos
+        ]
         registros_pagos_extra = criar_registros_relatorio_geral([], pagamentos_extra_raw)
         registros.extend(registros_pagos_extra)
+
+        # Acordos das carteiras migradas pro Virtua (ver CARTEIRAS_VIRTUA em
+        # virtua_emissao.py). Falha de conexão com o Virtua NÃO pode
+        # derrubar o sync do Stage.
+        registros_virtua = []
+        try:
+            from .virtua_emissao import buscar_registros_virtua_para_relatorio
+            virtua_raw = buscar_registros_virtua_para_relatorio(data_ini, data_fim)
+            registros_virtua = criar_registros_relatorio_geral([], virtua_raw)
+            registros.extend(registros_virtua)
+        except Exception as e:
+            print("Erro ao buscar acordos das carteiras Virtua:", e)
 
         with transaction.atomic():
             PainelOperacaoRelatorioGeral.objects.all().delete()
@@ -947,6 +997,7 @@ def sincronizar_relatorio_geral(data_ini=None, data_fim=None):
             f"Relatório geral OK. "
             f"Hub consolidado: {len(base_hub_consolidada)} | "
             f"Pagamentos extras: {len(pagamentos_extra_raw)} | "
+            f"Carteiras Virtua: {len(registros_virtua)} | "
             f"Total salvo: {len(registros)}"
         )
 

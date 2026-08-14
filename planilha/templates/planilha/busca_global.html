@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Busca global — Planilha — Credcom Hub{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0">🔎 Busca global <small class="text-muted">— todas as carteiras</small></h4>
+  <a href="{% url 'planilha:index' %}" class="btn btn-outline-secondary btn-sm">← Voltar pra Planilha</a>
+</div>
+
+<div class="alert alert-info py-2 small">
+  Busca em <strong>todas</strong> as bases, mesmo fora da sua carteira — mostra só o essencial
+  (carteira, responsável e nº contrato) pra você identificar quem atende esse cliente numa ligação.
+</div>
+
+<form method="get" class="card card-body mb-3">
+  <div class="row g-2 align-items-end">
+    <div class="col-md-6">
+      <label class="form-label mb-0 small">Nome, CPF/CNPJ ou Nº Contrato</label>
+      <input type="text" name="q" value="{{ q }}" class="form-control" placeholder="Digite pra buscar…" autofocus>
+    </div>
+    <div class="col-md-2">
+      <button type="submit" class="btn btn-primary btn-sm">Buscar</button>
+    </div>
+  </div>
+</form>
+
+{% if q %}
+  <div class="card">
+    <div class="table-responsive">
+      <table class="table table-sm table-hover mb-0 align-middle">
+        <thead class="table-light">
+          <tr>
+            <th>Nr Contrato</th>
+            <th>Cliente</th>
+            <th>CPF/CNPJ</th>
+            <th>Carteira</th>
+            <th>Responsável</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in resultados %}
+            <tr>
+              <td>{{ r.nr_contrato }}</td>
+              <td>{{ r.nome_cliente }}</td>
+              <td>{{ r.cpf_cnpj }}</td>
+              <td>{{ r.carteira_nome }}</td>
+              <td class="fw-semibold">{{ r.operador_nome }}</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="5" class="text-center text-muted py-4">Nenhum resultado pra "{{ q }}".</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% if resultados|length >= 30 %}
+    <div class="small text-muted mt-2">Mostrando os primeiros 30 resultados — refine a busca se precisar.</div>
+  {% endif %}
+{% endif %}
+{% endblock %}

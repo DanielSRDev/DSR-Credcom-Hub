@@ -60,9 +60,13 @@ CARGOS_OPERACAO = (
     grupos.GESTAO, grupos.GESTAO_GESTOR, grupos.POS_ACORDO,
     grupos.OPERACAO, grupos.JURIDICO,
 )
-CARGOS_GESTAO = (grupos.GESTAO, grupos.GESTAO_GESTOR)
-CARGOS_NIBO   = (grupos.GESTAO, grupos.FINANCEIRO)
-CARGOS_PAINEL = (grupos.GESTAO, grupos.GESTAO_GESTOR, grupos.OPERACAO)
+CARGOS_GESTAO   = (grupos.GESTAO, grupos.GESTAO_GESTOR)
+CARGOS_NIBO     = (grupos.GESTAO, grupos.FINANCEIRO)
+CARGOS_PAINEL   = (grupos.GESTAO, grupos.GESTAO_GESTOR, grupos.OPERACAO)
+CARGOS_PLANILHA = (grupos.GESTAO, grupos.GESTAO_GESTOR, grupos.OPERACAO)
+
+# Grupo (não-cargo) que libera a IMPORTAÇÃO de bases no módulo Planilha.
+GRUPO_BACKOFFICE = "Backoffice"
 
 
 def tem_acesso_operacao(user) -> bool:
@@ -87,6 +91,18 @@ def tem_acesso_painel(user) -> bool:
 
 def tem_acesso_financeiro(user) -> bool:
     return ve_tudo(user) or _tem_grupo(user, grupos.FINANCEIRO)
+
+
+def tem_acesso_planilha(user) -> bool:
+    # Backoffice também entra (é quem importa a base), mesmo sem cargo de operação.
+    return ve_tudo(user) or _tem_grupo(user, *CARGOS_PLANILHA, GRUPO_BACKOFFICE)
+
+
+def pode_importar_planilha(user) -> bool:
+    """Importar/substituir base é restrito ao grupo Backoffice (ou superuser)."""
+    if not user or not getattr(user, "is_authenticated", False):
+        return False
+    return bool(user.is_superuser) or _tem_grupo(user, GRUPO_BACKOFFICE)
 
 
 # ── equipes (fonte única: operacao.Equipe) ──────────────────────────────────

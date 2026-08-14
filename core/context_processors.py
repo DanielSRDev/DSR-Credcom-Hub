@@ -62,6 +62,8 @@ def nav_permissoes(request) -> Dict[str, bool]:
         "pode_ver_painel_operacao": False,
         "pode_ver_chat":            False,
         "pode_ver_financeiro":      False,
+        "pode_ver_planilha":        False,
+        "pode_importar_planilha":   False,
         "is_coordenacao":           False,
         "is_supervisao":            False,
         "is_operador":              False,
@@ -80,6 +82,8 @@ def nav_permissoes(request) -> Dict[str, bool]:
             "pode_ver_painel_operacao": True,
             "pode_ver_chat":            True,
             "pode_ver_financeiro":      True,
+            "pode_ver_planilha":        True,
+            "pode_importar_planilha":   True,
             "is_coordenacao":           True,
             "is_supervisao":            True,
             "is_operador":              True,
@@ -106,6 +110,7 @@ def nav_permissoes(request) -> Dict[str, bool]:
     tem_zapmsg     = roles.tem_acesso_zapmsg(user)
     tem_painel     = roles.tem_acesso_painel(user)
     tem_financeiro = roles.tem_acesso_financeiro(user)
+    tem_planilha   = roles.tem_acesso_planilha(user)
 
     # --- flags combinadas ((cargo OU liberação individual) E sem bloqueio) ---
     pode_ver_operacao = (tem_operacao or liberado("operacao")) and nao_bloqueado("operacao")
@@ -115,6 +120,8 @@ def nav_permissoes(request) -> Dict[str, bool]:
     pode_ver_painel_operacao = (tem_painel or liberado("painel_operacao")) and nao_bloqueado("painel_operacao")
     pode_ver_chat = nao_bloqueado("chat")  # qualquer autenticado pode ver chat
     pode_ver_financeiro = (tem_financeiro or liberado("financeiro")) and nao_bloqueado("financeiro")
+    pode_ver_planilha = (tem_planilha or liberado("planilha")) and nao_bloqueado("planilha")
+    pode_importar_planilha = pode_ver_planilha and roles.pode_importar_planilha(user)
 
     pode_postar_jornal = getattr(getattr(user, "perfil", None), "pode_publicar_jornal", False)
 
@@ -126,6 +133,8 @@ def nav_permissoes(request) -> Dict[str, bool]:
         "pode_ver_painel_operacao": pode_ver_painel_operacao,
         "pode_ver_chat":            pode_ver_chat,
         "pode_ver_financeiro":      pode_ver_financeiro,
+        "pode_ver_planilha":        pode_ver_planilha,
+        "pode_importar_planilha":   pode_importar_planilha,
         "is_coordenacao":           is_coordenacao,
         "is_supervisao":            is_supervisao,
         "is_operador":              is_operador,

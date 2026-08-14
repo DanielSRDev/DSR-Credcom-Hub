@@ -43,6 +43,8 @@ class ModuleGroupAccessMiddleware:
         "/zapmsg/":          {grupos.GESTAO, grupos.GESTAO_GESTOR, grupos.OPERACAO},
         "/chat/":            set(),  # acesso livre para autenticados — sem grupo exigido
         "/financeiro/":      {grupos.GESTAO, grupos.FINANCEIRO},
+        # "Backoffice" (grupo, não cargo) entra p/ importar a base.
+        "/planilha/":        {grupos.GESTAO, grupos.GESTAO_GESTOR, grupos.OPERACAO, "Backoffice"},
     }
 
     # Mapeamento prefixo → chave do Modulo em UsuarioRestricaoModulo
@@ -55,6 +57,7 @@ class ModuleGroupAccessMiddleware:
         "/zapmsg/":          "zapmsg",
         "/chat/":            "chat",
         "/financeiro/":      "financeiro",
+        "/planilha/":        "planilha",
     }
 
     PUBLIC_PATHS = {

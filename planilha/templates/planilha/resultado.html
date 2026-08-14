@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Importação concluída — Planilha{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0">✅ Importação concluída</h4>
+  <div>
+    <a href="{% url 'planilha:importar' %}" class="btn btn-outline-primary btn-sm">Importar outra</a>
+    <a href="{% url 'planilha:index' %}" class="btn btn-outline-secondary btn-sm">Ir para a Planilha</a>
+  </div>
+</div>
+
+<div class="card">
+  <div class="table-responsive">
+    <table class="table table-sm mb-0 align-middle">
+      <thead>
+        <tr><th>Carteira</th><th>Código</th><th>Modo</th><th class="text-end">Inseridos</th><th class="text-end">Já existentes (ignorados)</th><th class="text-end">Removidos</th><th>Base antiga</th></tr>
+      </thead>
+      <tbody>
+        {% for r in resultados %}
+          <tr>
+            <td>{{ r.carteira }}</td>
+            <td>{{ r.cre_id }}</td>
+            <td>
+              {% if r.adicionou %}<span class="badge bg-info text-dark">Adicionado</span>
+              {% elif r.substituiu %}<span class="badge bg-warning text-dark">Substituído</span>
+              {% else %}<span class="badge bg-success">Base nova</span>{% endif %}
+            </td>
+            <td class="text-end">{{ r.inseridos }}</td>
+            <td class="text-end">{{ r.ignorados_ja_existentes }}</td>
+            <td class="text-end">{{ r.removidos }}</td>
+            <td>
+              {% if r.substituiu %}
+                <a class="btn btn-sm btn-outline-success" href="{% url 'planilha:baixar_devolucao' r.arquivo_devolvido %}">⬇️ Baixar Excel da base antiga</a>
+              {% else %}
+                <span class="text-muted">—</span>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

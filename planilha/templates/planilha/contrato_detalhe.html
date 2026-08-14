@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}Contrato {{ c.nr_contrato }} — Planilha{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0">📝 Contrato {{ c.nr_contrato }}</h4>
+  <a href="{% url 'planilha:index' %}" class="btn btn-outline-secondary btn-sm">← Voltar</a>
+</div>
+
+{% if messages %}{% for m in messages %}<div class="alert alert-{{ m.tags|default:'info' }}">{{ m }}</div>{% endfor %}{% endif %}
+
+<div class="card mb-3">
+  <div class="card-body">
+    <div class="row">
+      <div class="col-md-6"><strong>Cliente:</strong> {{ c.nome_cliente }}</div>
+      <div class="col-md-6"><strong>CPF/CNPJ:</strong> {{ c.cpf_cnpj }}</div>
+      <div class="col-md-6"><strong>Carteira:</strong> {{ c.carteira_nome }} ({{ c.cre_id }})</div>
+      <div class="col-md-6"><strong>Operador:</strong> {{ c.operador_nome }}</div>
+      <div class="col-md-6"><strong>Empreendimento:</strong> {{ c.empreendimento }}</div>
+      <div class="col-md-6"><strong>Tipo:</strong> {{ c.tipo_contrato }}</div>
+      <div class="col-md-4"><strong>Atraso:</strong> {{ c.atraso_real|default_if_none:"—" }} dia(s)</div>
+      <div class="col-md-4"><strong>Vlr total:</strong> R$ {{ c.vlr_total }}</div>
+      <div class="col-md-4"><strong>Status:</strong> {{ c.status_antigo }}</div>
+      <div class="col-md-8">
+        <strong>Status Atual (Virtua):</strong>
+        {% if c.status_atual %}{{ c.status_atual }} <span class="text-muted small">(há {{ c.dias_status_atual }} dia{{ c.dias_status_atual|pluralize }})</span>{% else %}<span class="text-muted">—</span>{% endif %}
+      </div>
+    </div>
+
+    <hr>
+    <div class="d-flex align-items-center gap-3 flex-wrap">
+      {% if pode_priorizar %}
+        <form method="post" action="{% url 'planilha:toggle_prioridade' c.id %}">
+          {% csrf_token %}
+          <button type="submit" class="btn btn-sm {% if c.prioridade %}btn-warning{% else %}btn-outline-warning{% endif %}">
+            {% if c.prioridade %}⭐ Prioridade ligada{% else %}☆ Marcar prioridade{% endif %}
+          </button>
+        </form>
+      {% elif c.prioridade %}
+        <span class="badge bg-warning text-dark">⭐ Prioridade</span>
+      {% endif %}
+
+      <div class="d-flex align-items-center gap-1">
+        <span class="small text-muted">Destaque:</span>
+        {% for cor, nome in cores %}
+          <form method="post" action="{% url 'planilha:definir_destaque' c.id %}">
+            {% csrf_token %}<input type="hidden" name="cor" value="{{ cor }}">
+            <button type="submit" class="btn btn-sm p-2 border rounded {% if c.destaque_cor == cor %}border-3 border-dark{% endif %}" style="background:{{ cor }}" title="{{ nome }}"></button>
+          </form>
+        {% endfor %}
+        <form method="post" action="{% url 'planilha:definir_destaque' c.id %}">
+          {% csrf_token %}<input type="hidden" name="cor" value="">
+          <button type="submit" class="btn btn-sm btn-outline-secondary" title="Limpar">✕</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ---------- Acréscimos ---------- #}
+<div class="card">
+  <div class="card-header">Acréscimos (telefone, e-mail, nota)</div>
+  <div class="card-body">
+    <form method="post" action="{% url 'planilha:adicionar_acrescimo' c.id %}" class="row g-2 align-items-end mb-3">
+      {% csrf_token %}
+      <div class="col-md-3">
+        <label class="form-label mb-0 small">Tipo</label>
+        <select name="tipo" class="form-select form-select-sm">
+          {% for val, label in tipos %}<option value="{{ val }}">{{ label }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="col-md-7">
+        <label class="form-label mb-0 small">Valor</label>
+        <input type="text" name="valor" class="form-control form-control-sm" placeholder="Telefone, e-mail ou lembrete…" required>
+      </div>
+      <div class="col-md-2">
+        <button type="submit" class="btn btn-primary btn-sm w-100">Adicionar</button>
+      </div>
+    </form>
+
+    {% if acrescimos %}
+      <ul class="list-group">
+        {% for a in acrescimos %}
+          <li class="list-group-item d-flex justify-content-between align-items-start">
+            <div>
+              <span class="badge bg-secondary">{{ a.get_tipo_display }}</span>
+              {{ a.valor }}
+              <div class="small text-muted">por {{ a.criado_por.get_full_name|default:a.criado_por.username|default:"—" }} em {{ a.criado_em|date:"d/m/Y H:i" }}</div>
+            </div>
+            <form method="post" action="{% url 'planilha:excluir_acrescimo' a.id %}">
+              {% csrf_token %}
+              <button type="submit" class="btn btn-sm btn-outline-danger" title="Remover">🗑️</button>
+            </form>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="text-muted mb-0">Nenhum acréscimo ainda.</p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

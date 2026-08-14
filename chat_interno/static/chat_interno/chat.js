@@ -16,11 +16,9 @@ window.ChatUI = (() => {
   let sending = false;
   let historyLoading = false;
 
-  const HISTORY_PAGE_SIZE = 50;
-
   let lastRenderedLastId = 0;
-  let oldestRenderedId = 0;
-  let hasMoreOlder = false;
+  let currentViewDate = null; // null = hoje/ao vivo; "YYYY-MM-DD" = data (inicial) filtrada
+  let currentViewDateEnd = null; // "YYYY-MM-DD" = data final do período filtrado (quando diferente da inicial)
   let lastMarkAt = 0;
 
   let lastSoundId = 0;
@@ -121,6 +119,50 @@ window.ChatUI = (() => {
     } catch (_) { return iso; }
   }
 
+  function formatDateOnly(isoDate) {
+    if (!isoDate) return "";
+    const [y, m, d] = isoDate.split("-");
+    return `${d}/${m}/${y}`;
+  }
+
+  function todayISODate() {
+    const d = new Date();
+    const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+    return local.toISOString().slice(0, 10);
+  }
+
+  // Lightbox: expandir imagem enviada no chat em tela cheia.
+  function openImageLightbox(url) {
+    const box = document.getElementById("chatImgLightbox");
+    const img = document.getElementById("chatImgLightboxImg");
+    if (!box || !img) return;
+    img.src = url;
+    box.style.display = "flex";
+  }
+
+  function closeImageLightbox() {
+    const box = document.getElementById("chatImgLightbox");
+    const img = document.getElementById("chatImgLightboxImg");
+    if (!box) return;
+    box.style.display = "none";
+    if (img) img.src = "";
+  }
+
+  function updateDateViewIndicator() {
+    const badge = document.getElementById("chatSelectedBadge");
+    const todayBtn = document.getElementById("chatDateTodayBtn");
+    if (currentViewDate) {
+      const label = (currentViewDateEnd && currentViewDateEnd !== currentViewDate)
+        ? `Vendo: ${formatDateOnly(currentViewDate)} até ${formatDateOnly(currentViewDateEnd)}`
+        : `Vendo: ${formatDateOnly(currentViewDate)}`;
+      if (badge) { badge.textContent = label; badge.classList.remove("d-none"); }
+      if (todayBtn) todayBtn.style.display = "";
+    } else {
+      if (badge) { badge.textContent = ""; badge.classList.add("d-none"); }
+      if (todayBtn) todayBtn.style.display = "none";
+    }
+  }
+
   function paintStatusButtons() {
     const box = document.querySelector(".chat-status-box");
     if (!box) return;
@@ -186,12 +228,21 @@ window.ChatUI = (() => {
   }
 
   function enableConversationUI(on) {
-    ["chatInput","chatSendBtn","chatSearchMsg","chatSearchBtn","chatEmojiBtn","chatImgBtn"].forEach((id) => {
+    ["chatInput","chatSendBtn","chatDateFilter","chatDateFilterEnd","chatDateFilterBtn","chatEmojiBtn","chatImgBtn"].forEach((id) => {
       const el = document.getElementById(id);
       if (el) el.disabled = !on;
     });
     const exportBtn = document.getElementById("chatExportBtn");
     if (exportBtn) exportBtn.style.display = on && canExport ? "" : "none";
+  }
+
+  // Desliga só os controles de envio (usado no modo monitor: só visualização).
+  // O filtro de data continua liberado — é leitura, não envio.
+  function enableSendUI(on) {
+    ["chatInput","chatSendBtn","chatEmojiBtn","chatImgBtn"].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.disabled = !on;
+    });
   }
 
   function setActiveContact(otherId) {
@@ -291,7 +342,7 @@ window.ChatUI = (() => {
     const fd = new FormData();
     fd.append("emoji", emoji);
     await apiPost(`/chat/react/${msgId}/`, fd);
-    await loadInitialHistory(); // recarrega o lote atual para refletir a reação
+    await loadHistoryForDate(currentViewDate, currentViewDateEnd); // recarrega o período atual para refletir a reação
   }
 
   async function loadContacts() {
@@ -390,16 +441,22 @@ window.ChatUI = (() => {
     currentOtherId = Number(otherId);
     suppressHistorySound = true;
     lastRenderedLastId = 0;
-    oldestRenderedId = 0;
-    hasMoreOlder = false;
     lastSoundId = 0;
+    currentViewDate = null;
+    currentViewDateEnd = null;
     clearReply();
 
     const otherHidden = document.getElementById("chatOtherId");
     if (otherHidden) otherHidden.value = currentOtherId;
 
+    const dateFilter = document.getElementById("chatDateFilter");
+    if (dateFilter) { dateFilter.value = ""; dateFilter.max = todayISODate(); }
+    const dateFilterEnd = document.getElementById("chatDateFilterEnd");
+    if (dateFilterEnd) { dateFilterEnd.value = ""; dateFilterEnd.max = todayISODate(); }
+    updateDateViewIndicator();
+
     enableConversationUI(true);
-    if (actorUserId) enableConversationUI(false);
+    if (actorUserId) enableSendUI(false);
 
     const hint = document.getElementById("chatHint");
     if (hint) hint.textContent = otherName ? `Conversa com: ${otherName}` : "Conversa aberta.";
@@ -414,12 +471,14 @@ window.ChatUI = (() => {
 
     await doPing();
     await loadContacts();
-    await loadInitialHistory();
+    await loadHistoryForDate(null);
 
     suppressHistorySound = false;
 
     if (pollTimer) clearInterval(pollTimer);
-    pollTimer = setInterval(() => { pollNewMessages().catch(() => {}); }, 4000);
+    pollTimer = setInterval(() => {
+      if (currentViewDate === null) pollNewMessages().catch(() => {});
+    }, 4000);
   }
 
   // Constrói o elemento DOM de uma mensagem (bolha + reações + ações).
@@ -522,31 +581,51 @@ window.ChatUI = (() => {
     return wrap;
   }
 
-  // Carrega o lote inicial (mais recente) de mensagens de uma conversa.
-  async function loadInitialHistory() {
+  // Carrega a conversa de um dia específico, ou de um período quando
+  // dateEndStr é informado e diferente de dateStr (padrão: hoje). Sem
+  // mensagens no período, fica em branco — não puxa histórico antigo
+  // automaticamente.
+  async function loadHistoryForDate(dateStr, dateEndStr = null) {
     if (!currentOtherId || historyLoading) return;
     historyLoading = true;
 
     try {
-      const data = await apiGet(`/chat/history/${currentOtherId}/?limit=${HISTORY_PAGE_SIZE}`);
-      if (data?.error) return;
+      let url = `/chat/history/${currentOtherId}/`;
+      if (dateStr) {
+        const params = new URLSearchParams({ date: dateStr });
+        if (dateEndStr && dateEndStr !== dateStr) params.set("date_end", dateEndStr);
+        url += `?${params.toString()}`;
+      }
+      const data = await apiGet(url);
+      if (data?.error) { alert(data.error); return; }
 
       const box = document.getElementById("chatMsgs");
       if (!box) return;
 
       const items = data.items || [];
-      hasMoreOlder = !!data.has_more;
-
       box.innerHTML = "";
-      items.forEach((m) => box.appendChild(renderMessageNode(m)));
+
+      if (items.length === 0) {
+        const label = data.is_today
+          ? "hoje"
+          : (data.date_end && data.date_end !== data.date)
+            ? `entre ${formatDateOnly(data.date)} e ${formatDateOnly(data.date_end)}`
+            : `em ${formatDateOnly(data.date)}`;
+        box.innerHTML = `<div class="text-secondary small text-center mt-3">Nenhuma mensagem ${label}.</div>`;
+      } else {
+        items.forEach((m) => box.appendChild(renderMessageNode(m)));
+      }
       box.scrollTop = box.scrollHeight;
 
       const lastMsg = items.length ? items[items.length - 1] : null;
-      lastRenderedLastId = lastMsg ? Number(lastMsg.id || 0) : 0;
-      oldestRenderedId = items.length ? Number(items[0].id || 0) : 0;
+      lastRenderedLastId = lastMsg ? Number(lastMsg.id || 0) : Number(data.baseline_id || 0);
       lastSoundId = lastRenderedLastId;
 
-      if (lastRenderedLastId) {
+      currentViewDate = data.is_today ? null : (data.date || null);
+      currentViewDateEnd = data.is_today ? null : (data.date_end || null);
+      updateDateViewIndicator();
+
+      if (data.is_today) {
         const now = Date.now();
         if (now - lastMarkAt > 1500) { lastMarkAt = now; await markRead(currentOtherId); }
         await loadContacts();
@@ -591,37 +670,10 @@ window.ChatUI = (() => {
       }
 
       lastRenderedLastId = lastId;
-      if (!oldestRenderedId) oldestRenderedId = Number(items[0].id || 0);
 
       const now = Date.now();
       if (now - lastMarkAt > 1500) { lastMarkAt = now; await markRead(currentOtherId); }
       await loadContacts();
-    } finally { historyLoading = false; }
-  }
-
-  // Carrega mensagens mais antigas (scroll para o topo) e as insere no início.
-  async function loadOlderMessages() {
-    if (!currentOtherId || !hasMoreOlder || historyLoading || !oldestRenderedId) return;
-    historyLoading = true;
-
-    try {
-      const data = await apiGet(`/chat/history/${currentOtherId}/?before_id=${oldestRenderedId}&limit=${HISTORY_PAGE_SIZE}`);
-      if (data?.error) return;
-
-      const items = data.items || [];
-      hasMoreOlder = !!data.has_more;
-      if (!items.length) return;
-
-      const box = document.getElementById("chatMsgs");
-      if (!box) return;
-
-      const prevScrollHeight = box.scrollHeight;
-      const frag = document.createDocumentFragment();
-      items.forEach((m) => frag.appendChild(renderMessageNode(m)));
-      box.insertBefore(frag, box.firstChild);
-
-      oldestRenderedId = Number(items[0].id || 0);
-      box.scrollTop = box.scrollHeight - prevScrollHeight;
     } finally { historyLoading = false; }
   }
 
@@ -761,7 +813,12 @@ window.ChatUI = (() => {
       clearPastedImagePreview();
       clearReply();
 
-      await loadInitialHistory();
+      // após enviar, volta para a visão ao vivo (hoje)
+      const dateFilter = document.getElementById("chatDateFilter");
+      if (dateFilter) dateFilter.value = "";
+      const dateFilterEnd = document.getElementById("chatDateFilterEnd");
+      if (dateFilterEnd) dateFilterEnd.value = "";
+      await loadHistoryForDate(null);
     } finally { sending = false; }
   }
 
@@ -781,14 +838,62 @@ window.ChatUI = (() => {
 
     if (clearReplyBtn) clearReplyBtn.addEventListener("click", clearReply);
 
+    // Filtro de data (ver conversa de um dia específico, ou de um período
+    // quando a data final também é preenchida)
+    const dateFilter = document.getElementById("chatDateFilter");
+    const dateFilterEnd = document.getElementById("chatDateFilterEnd");
+    const dateFilterBtn = document.getElementById("chatDateFilterBtn");
+    const dateTodayBtn = document.getElementById("chatDateTodayBtn");
+
+    if (dateFilterBtn) {
+      dateFilterBtn.addEventListener("click", () => {
+        const val = dateFilter?.value;
+        if (!val) return;
+        loadHistoryForDate(val, dateFilterEnd?.value || null).catch(() => {});
+      });
+    }
+    if (dateFilter) {
+      dateFilter.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") { e.preventDefault(); dateFilterBtn?.click(); }
+      });
+    }
+    if (dateFilterEnd) {
+      dateFilterEnd.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") { e.preventDefault(); dateFilterBtn?.click(); }
+      });
+    }
+    if (dateTodayBtn) {
+      dateTodayBtn.addEventListener("click", () => {
+        if (dateFilter) dateFilter.value = "";
+        if (dateFilterEnd) dateFilterEnd.value = "";
+        loadHistoryForDate(null).catch(() => {});
+      });
+    }
+
+    // Lightbox de imagem: fechar no X, clicando no fundo, ou com Esc
+    const imgLightbox = document.getElementById("chatImgLightbox");
+    const imgLightboxClose = document.getElementById("chatImgLightboxClose");
+    if (imgLightboxClose) imgLightboxClose.addEventListener("click", closeImageLightbox);
+    if (imgLightbox) {
+      imgLightbox.addEventListener("click", (e) => {
+        if (e.target === imgLightbox) closeImageLightbox();
+      });
+    }
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closeImageLightbox();
+    });
+
     // Delegação de eventos na área de mensagens
     const msgsBox = document.getElementById("chatMsgs");
     if (msgsBox) {
-      msgsBox.addEventListener("scroll", () => {
-        if (msgsBox.scrollTop < 80) loadOlderMessages().catch(() => {});
-      });
-
       msgsBox.addEventListener("click", (e) => {
+        // Clique numa imagem enviada no chat → abre em tela cheia
+        const imgEl = e.target.closest("img.chat-img");
+        if (imgEl) {
+          openImageLightbox(imgEl.src);
+          return;
+        }
+
         // Botões de ação (reply / react) e badges de reação
         const btn = e.target.closest("[data-action]");
         if (btn) {

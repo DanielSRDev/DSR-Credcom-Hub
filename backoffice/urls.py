@@ -22,6 +22,7 @@ urlpatterns = [
     path("operacao/painel/", include(("painel_operacao.urls", "painel_operacao"), namespace="painel_operacao")),
     path("core/", include(("core.urls", "core"), namespace="core")),
     path("financeiro/", include(("financeiro.urls", "financeiro"), namespace="financeiro")),
+    path("planilha/", include(("planilha.urls", "planilha"), namespace="planilha")),
 
 ] + static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
 

@@ -76,10 +76,15 @@ def qs_relatorio_vinculado():
 def aplicar_filtros_relatorio(data_ini=None, data_fim=None, supervisor=None, operador=None, credor=None):
     qs = qs_relatorio_vinculado()
 
+    # Periodo filtra por DATA DE EMISSAO (quando o operador fez o acordo),
+    # nao por data_referencia (=data_acordo/vencimento). Pedido do usuario
+    # 2026-08-07: o Acompanhamento deve refletir o que foi trabalhado no dia,
+    # nao quando a parcela negociada vence. data_emissao e DateTimeField,
+    # por isso o lookup __date para comparar so a data.
     if data_ini:
-        qs = qs.filter(data_referencia__gte=data_ini)
+        qs = qs.filter(data_emissao__date__gte=data_ini)
     if data_fim:
-        qs = qs.filter(data_referencia__lte=data_fim)
+        qs = qs.filter(data_emissao__date__lte=data_fim)
     if supervisor:
         qs = qs.filter(supervisor_nome=supervisor.nome)
     if operador:
